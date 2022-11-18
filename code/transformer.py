@@ -15,7 +15,7 @@ class AbstractLayer(nn.Module):
     pass
 
 
-class AbstractAffine():
+class AbstractAffine(nn.Module):
 
     def __init__(self, layer):
         super().__init__()
@@ -23,14 +23,12 @@ class AbstractAffine():
         # Each node contain a upper and lower bound: 1D array
         self.ub = None
         self.lb = None
+        self.input_ub = None
+        self.input_lb = None
         # Each node contain a upper and lower linear constraint:
         # In an affine layer these are the same.
         self.W = layer.weight.data
         self.b = layer.bias.data
-        #self.W = -torch.ones_like(self.W)
-        #self.W = torch.Tensor([[-1, -1, 1, 1],
-        #                        [-1, -1, 1, 1]])
-        #self.b = torch.zeros_like(self.b)
         self.W_upper = None
         self.b_upper = None
         self.W_lower = None
@@ -41,20 +39,25 @@ class AbstractAffine():
         
     def forward(self, prev_layer):
         # Push shape from previous layer through this layer
+        self.input_ub = prev_layer.input_ub
+        self.input_lb = prev_layer.input_lb
 
         # For each node in this layer, we have a constraint
         # with 'in_features'+1 coefficients.
         # The coefficient matrix is simply w and b concatinated.
         w_pos = self.W >= 0.
 
-        # TODO: these are duplicates in affine layer?
         self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
         self.W_lower = (w_pos*self.W)@prev_layer.W_lower+(~w_pos*self.W)@prev_layer.W_upper
         self.b_lower = self.W@prev_layer.b_lower+self.b
         self.b_upper = self.W@prev_layer.b_upper+self.b
 
-        self.ub = (w_pos*self.W)@prev_layer.ub+(~(w_pos)*self.W)@prev_layer.lb+self.b 
-        self.lb = (w_pos*self.W)@prev_layer.lb+(~(w_pos)*self.W)@prev_layer.ub+self.b 
+        # Since W_upper and W_lower contain the constraints in terms of the input layers
+        # we use the input lower/upper bound. I.e this automatically does backsub to input layer. 
+        wu_pos = self.W_upper >= 0.
+        wl_pos = self.W_lower >= 0.
+        self.ub = (wu_pos*self.W_upper)@self.input_ub+(~wu_pos*self.W_upper)@self.input_lb+self.b_upper 
+        self.lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
 
         return self
 
@@ -65,6 +68,7 @@ class AbstractInput(nn.Module):
         We only have to clamp these to satisify normalization.
     """
     def __init__(self, eps):
+        super().__init__()
         self.eps = eps
 
         self.W_lower = None 
@@ -77,25 +81,37 @@ class AbstractInput(nn.Module):
 
         self.input_ub = None
         self.input_lb = None
+
     
     def forward(self, x):
         #self.x = x
-        self.W_lower = torch.eye(x.shape)
-        self.W_upper = torch.eye(x.shape)
-        self.b_lower = torch.zeros(x.shape)
-        self.b_upper = torch.zeros(x.shape)
+        assert x.dim() == 1, 'Dimension should be one in input!'
+        n_inputs = x.shape[0]
+        self.W_lower = torch.eye(n_inputs)
+        self.W_upper = torch.eye(n_inputs)
+        self.b_lower = torch.zeros(n_inputs)
+        self.b_upper = torch.zeros(n_inputs)
         
         # TODO: input x have to be normalized!!!!!!!
         self.input_ub = torch.clamp(x+self.eps, max=1.)
         self.input_lb = torch.clamp(x-self.eps, min=0.)
+        self.ub = self.input_ub.clone()
+        self.lb = self.input_lb.clone()
+
+        print(f'Inited input layer: lb/ub {self.ub}/{self.lb}')
+
+        return self
 
 
 
-class AbstractReLU():
+class AbstractReLU(nn.Module):
 
     def __init__(self, layer, last_layer):
+        super().__init__()
         self.ub = None
         self.lb = None
+        self.input_ub = None
+        self.input_lb = None
 
         # wrong inits?
         self.W_upper = None
@@ -114,6 +130,8 @@ class AbstractReLU():
 
         # When ReLU crossing we always have positive coef infront of constraint bounds
         # The same is true for negative and positive relu
+        self.input_ub = prev_layer.input_ub
+        self.input_lb = prev_layer.input_lb
 
         # There are three cases
         neg_mask = prev_layer.ub <= 0.
@@ -162,7 +180,7 @@ class AbstractReLU():
         # Lowerbound after a ReLU is always alpha*x
         self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
 
-        return
+        return self
 
 
 

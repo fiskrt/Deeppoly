@@ -14,11 +14,11 @@ class DeepPolyNet(nn.Module):
     """
     def __init__(self, orig_net, eps):
         super().__init__()
-        self.abs_net = self.abstractize_network(orig_net)
-
         self.eps = eps
         self.prev_layer = None
         self.is_residual = False
+
+        self.abs_net = self.abstractize_network(orig_net)
 
     def __call__(self, x):
         return self.forward(x)
@@ -73,13 +73,15 @@ for i,param in enumerate(net.parameters()):
     print(param)
 
 dp = DeepPolyNet(net, 1)
-print(dp.abs_net)
+#print(dp.abs_net)
 
-inp = torch.Tensor([0.5, 0.5, 5,5])
-dp.abs_net[0].forward()
+inp = torch.tensor([0.5, 0.5, 5,5])
+out = dp(inp)
 
-dp.abs_net[1].forward(dp.abs_net[0])
+#dp.abs_net[0].forward()
 
-dp.abs_net[2].forward(dp.abs_net[1])
+#dp.abs_net[1].forward(dp.abs_net[0])
+
+#dp.abs_net[2].forward(dp.abs_net[1])
 
 print('lol')
