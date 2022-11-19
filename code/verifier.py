@@ -3,6 +3,7 @@ import csv
 import torch
 import torch.nn.functional as F
 from networks import get_network, get_net_name, NormalizedResnet
+from deeppoly import DeepPolyNet
 
 
 DEVICE = 'cpu'
@@ -49,7 +50,23 @@ def get_net(net, net_name):
 
 
 def analyze(net, inputs, eps, true_label):
-    return 0
+    print(inputs.shape)
+    inputs = inputs.flatten()
+    print(inputs.shape)
+    print(inputs.max())
+    print(inputs.min())
+    print(f'true lab: {true_label}')
+
+    import time
+    start = time.time()
+    for _ in range(500):
+        dp = DeepPolyNet(net, inputs, eps, true_label)
+        res = dp.verify()
+        if res:
+            break
+    print(f'Verifying took: {time.time()-start}')
+
+    return res
 
 
 def main():
@@ -76,3 +93,6 @@ def main():
 
 if __name__ == '__main__':
     main()
+
+    n = get_net('net8', get_net_name('net8'))
+    #print(n)
