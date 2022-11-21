@@ -59,7 +59,7 @@ def analyze(net, inputs, eps, true_label):
 
     import time
     start = time.time()
-    for _ in range(500):
+    for _ in range(1):
         dp = DeepPolyNet(net, inputs, eps, true_label)
         res = dp.verify()
         if res:

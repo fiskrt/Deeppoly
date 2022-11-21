@@ -5,6 +5,8 @@
 
 import torch
 import torch.nn as nn
+from torch.nn.parameter import Parameter, UninitializedParameter
+
 
 class AbstractLayer(nn.Module):
     """
@@ -65,19 +67,20 @@ class AbstractAffine(nn.Module):
 
 class AbstractOutput(AbstractAffine):
     """
-        This layer is to x_best
+        This layer combines the final affine layer with
+        the output layer that does x_best-x_j
     """
-    def __init__(self, n_in, pred):
+    def __init__(self, W, b, pred):
         # Create matrix for x_best-x 
-        M_1 = -1.*torch.eye(n_in) 
+        M_1 = -1.*torch.eye(W.shape[0]) 
         M_2 = torch.zeros_like(M_1)
         M_2[:,pred] = 1.
         M = M_1+M_2
         M = torch.cat((M[:pred], M[pred+1:]))
 
         #print(f'M: {M}')
-
-        super().__init__(M, torch.zeros(n_in-1))
+        # bias is always zero in output layer!
+        super().__init__(M@W, M@b)
         #self.pred = pred 
 
     def forward(self, prev_layer):
@@ -146,10 +149,11 @@ class AbstractReLU(nn.Module):
         self.b_upper = None
         self.W_lower = None
         self.b_lower = None
+
+        self.inited = False
+
+#        self.alpha = UninitializedParameter()
         
-        # TODO: How to init alpha? random/minimum area?
-        # make sure between 0,1 softmax?
-        self.alpha = torch.rand(last_layer.b.shape, requires_grad=True)
 
     def forward(self, prev_layer):    
         # Before a ReLU layer we want to backsub so we maximize our chance of
@@ -167,7 +171,7 @@ class AbstractReLU(nn.Module):
         pos_mask = prev_layer.lb >= 0.
         cross_mask = ~(neg_mask | pos_mask)
 
-        print(f'Number of crossing ReLUs: {cross_mask.sum()}')
+        #print(f'Number of crossing ReLUs: {cross_mask.sum()}')
         #print(f'Pos relu at positions: {pos_mask} with incoming lb/ub: {prev_layer.lb[pos_mask]}/{prev_layer.ub[pos_mask]}')
         #print(f'neg relu at positions: {neg_mask} with incoming lb/ub: {prev_layer.lb[neg_mask]}/{prev_layer.ub[neg_mask]}')
         #print(f'Crossing relu at positions: {cross_mask} with incoming lb/ub: {prev_layer.lb[cross_mask]}/{prev_layer.ub[cross_mask]}')
@@ -193,6 +197,26 @@ class AbstractReLU(nn.Module):
 
         # Crossing case: 
         if cross_mask.any():
+            # TODO: How to init alpha? random/minimum area?
+            # make sure between 0,1 softmax?
+            # TODO: When initing this, it may depend on alpha from previous layer
+            # should it then not be a parameter?
+            # TODO: Init all alphas since during training the crossing relus can change place
+            # and change in count. But the first layer alphas are always the same? 
+            with torch.no_grad():
+                if not self.inited:
+                    self.inited = ~self.inited
+                    alpha = torch.zeros(self.n_out)
+                    #alpha[prev_layer.ub[cross_mask] > -prev_layer.lb[cross_mask]] = 1.
+        #            self.alpha.materialize(alpha.shape)
+        #            self.alpha.data = alpha #= Parameter(self.alpha)
+        #            self.alpha = torch.tensor(alpha, requires_grad=True)
+                    self.alpha = Parameter(alpha)
+                    print(f'alpha from trans: {cross_mask.sum()}')
+                if self.inited:
+                    self.alpha.data = self.alpha.clamp(0,1)
+
+    #        self.alpha = torch.zeros(last_layer.b.shape, requires_grad=True)
             # The ReLU upperbound will be some a^Tx+b
             # where a_i is given by u/(u-l) and b_i=-u*l/(u*l)
             a = prev_layer.ub[cross_mask] / (prev_layer.ub[cross_mask]-prev_layer.lb[cross_mask])

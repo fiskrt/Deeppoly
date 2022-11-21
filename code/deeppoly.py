@@ -1,6 +1,7 @@
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
+import torch.optim as optim
 from transformer import *
 
 
@@ -15,6 +16,7 @@ class DeepPolyNet(nn.Module):
         self.eps = eps
         self.prev_layer = None
         self.is_residual = False
+        #print(f'orignal net outp: {orig_net(inp)}')
         #self.target = orig_net(inp).squeeze()
         self.true_label = true_label # the actual number, not the index!
         assert inp.dim() == 1, "Input is not 1d!"
@@ -30,9 +32,25 @@ class DeepPolyNet(nn.Module):
         return self.abs_net.forward(x)
 
     def verify(self):
-        out = self.forward(self.input)
-        print(out.lb) 
-        return (out.lb>=0).all()
+        self(self.input) # Dummy call to init parameters
+        optimizer = optim.SGD(self.parameters(), lr=0.1)
+        print(self)
+        for i in range(1000):
+            optimizer.zero_grad()
+            out = self(self.input)
+            if i ==0:
+                print(out.lb)
+            # change loss to sum/mean of all negative?
+            loss = -out.lb[out.lb<0].mean()
+            loss.backward()
+            if i%300==0:
+                print(out.lb)
+                #print([p for p in self.parameters()])
+            optimizer.step()
+            if (out.lb>=0).all():
+                return True
+        
+        return False
 
     def abstractize_network(self, net):
         """
@@ -56,7 +74,7 @@ class DeepPolyNet(nn.Module):
         
         print('-'*50)
         assert isinstance(layers[-1], AbstractAffine), "Final layer is not affine!"
-        layers.append(AbstractOutput(layers[-1].n_out, self.true_label))
+        layers[-1] = AbstractOutput(layers[-1].W, layers[-1].b, self.true_label)
         return nn.Sequential(*layers)
 
 
@@ -86,7 +104,7 @@ if __name__=='__main__':
     #    print(param_tensor, "\t", net.state_dict()[param_tensor])
 
     #torch.save(net.state_dict(), 'weights')
-    W1 = torch.Tensor([[1,1,0,0], [1,-2,0,0]])
+    W1 = torch.Tensor([[-0.5,1,0,0], [1,-2,0,0]])
     W2 = torch.Tensor([[1,1], [-1,1]])
 
     b1 = torch.Tensor([0,0])
@@ -95,16 +113,20 @@ if __name__=='__main__':
 
     for i,param in enumerate(net.parameters()):
         param.data = my_params[i]
-        print(param)
+        #print(param)
 
 
     #print(dp.abs_net)
 
     inp = torch.tensor([0.5, 0.5, 0,0])
-    dp = DeepPolyNet(net, inp, 1)
+    dp = DeepPolyNet(net, inp, 1, 0)
+    #print('-'*20)
+    #print(dp.parameters())
     print(dp)
     out = dp(inp)
 
+    #print('-'*20)
+    #print(dp.parameters())
     #dp.loss(out)
 
     #dp.abs_net[0].forward()
