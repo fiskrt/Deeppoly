@@ -33,6 +33,11 @@ class DeepPolyNet(nn.Module):
 
     def verify(self):
         self(self.input) # Dummy call to init parameters
+        ub, lb = self.backsub()
+        print('the backsubbed lb and ub:')
+        print(lb)
+        print(ub)
+        print('-'*50)
         optimizer = optim.SGD(self.parameters(), lr=0.1)
         print(self)
         for i in range(1000):
@@ -51,6 +56,37 @@ class DeepPolyNet(nn.Module):
                 return True
         
         return False
+    
+    def backsub(self):
+        # want to backsub at last layer
+        # and before relus incase we can get rid of crossing ReLU
+
+        # TODO: move this into transformers? each transformer have backsub()
+
+        layer = self.abs_net[-1]
+        W_upper = layer.W_upper2
+        W_lower = layer.W_lower2
+        while layer.prev:
+            prev = layer.prev
+            M_u = W_upper >= 0
+            M_l = W_lower >= 0
+            W_upper = M_u*W_upper@prev.W_upper2 + ~M_u*W_upper@prev.W_lower2
+            W_lower = M_l*W_lower@prev.W_lower2 + ~M_l*W_lower@prev.W_lower2
+
+            print(f'At layer {layer} the upper constraints: {W_upper}')
+            layer = prev
+        # We reached the input layer and we can now calc the ub/lb with the
+        # input weights
+        M_u = W_upper >= 0
+        M_l = W_lower >= 0
+        ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb
+        lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub
+
+        print(f'lb: {lb}')
+        print(f'ub: {ub}')
+        return ub, lb
+
+
 
     def abstractize_network(self, net):
         """
@@ -104,7 +140,7 @@ if __name__=='__main__':
     #    print(param_tensor, "\t", net.state_dict()[param_tensor])
 
     #torch.save(net.state_dict(), 'weights')
-    W1 = torch.Tensor([[-0.5,1,0,0], [1,-2,0,0]])
+    W1 = torch.Tensor([[1,1,0,0], [1,-2,0,0]])
     W2 = torch.Tensor([[1,1], [-1,1]])
 
     b1 = torch.Tensor([0,0])
@@ -124,6 +160,8 @@ if __name__=='__main__':
     #print(dp.parameters())
     print(dp)
     out = dp(inp)
+
+    dp.backsub()
 
     #print('-'*20)
     #print(dp.parameters())

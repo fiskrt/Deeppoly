@@ -38,7 +38,7 @@ class AbstractAffine(nn.Module):
         self.n_out, self.n_in = self.W.shape
     
     def __str__(self):
-        print(f'W: {self.W} b: {self.b}')
+        return 'AbstractAffine'
         
     def forward(self, prev_layer):
         self.prev = prev_layer
@@ -50,6 +50,10 @@ class AbstractAffine(nn.Module):
         # with 'in_features'+1 coefficients.
         # The coefficient matrix is simply w and b concatinated.
         w_pos = self.W >= 0.
+        self.W_upper2 = self.W.clone()
+        self.W_lower2 = self.W.clone()
+        self.b_upper2 = self.b.clone()
+        self.b_lower2 = self.b.clone()
 
         self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
         self.W_lower = (w_pos*self.W)@prev_layer.W_lower+(~w_pos*self.W)@prev_layer.W_upper
@@ -83,6 +87,9 @@ class AbstractOutput(AbstractAffine):
         super().__init__(M@W, M@b)
         #self.pred = pred 
 
+    def __str__(self):
+        return 'AbstractOutput'
+
     def forward(self, prev_layer):
         return super().forward(prev_layer)
 
@@ -109,6 +116,11 @@ class AbstractInput(nn.Module):
         self.input_ub = None
         self.input_lb = None
 
+        self.prev = None
+
+
+    def __str__(self):
+        return 'AbstractInput'
     
     def forward(self, x):
         #self.x = x
@@ -119,6 +131,12 @@ class AbstractInput(nn.Module):
         self.W_upper = torch.eye(self.n_in)
         self.b_lower = torch.zeros(self.n_in)
         self.b_upper = torch.zeros(self.n_in)
+
+        #remove
+        self.W_lower2 = torch.eye(self.n_in)
+        self.W_upper2 = torch.eye(self.n_in)
+        self.b_upper2 = torch.zeros(self.n_in)
+        self.b_lower2 = torch.zeros(self.n_in)
         
         # TODO: input x have to be normalized!!!!!!!
         self.input_ub = torch.clamp(x+self.eps, max=1.)
@@ -136,6 +154,7 @@ class AbstractReLU(nn.Module):
 
     def __init__(self, layer, last_layer):
         super().__init__()
+        self.prev = None
         self.ub = None
         self.lb = None
         self.input_ub = None
@@ -154,8 +173,11 @@ class AbstractReLU(nn.Module):
 
 #        self.alpha = UninitializedParameter()
         
+    def __str__(self):
+        return 'AbstractReLU'
 
     def forward(self, prev_layer):    
+        self.prev = prev_layer
         # Before a ReLU layer we want to backsub so we maximize our chance of
         # getting a non-crossing ReLU.
 
@@ -185,6 +207,11 @@ class AbstractReLU(nn.Module):
         self.W_lower = torch.zeros((self.n_out, prev_layer.W_lower.shape[1]))
         self.b_lower = torch.zeros(self.n_out)
 
+        self.W_upper2 = torch.zeros((self.n_in, self.n_in))
+        self.W_lower2 = torch.zeros((self.n_in, self.n_in))
+        self.b_upper2 = torch.zeros(self.n_in)
+        self.b_lower2 = torch.zeros(self.n_in)
+
         # Positive case:
         self.ub[pos_mask] = prev_layer.ub[pos_mask]
         self.lb[pos_mask] = prev_layer.lb[pos_mask]
@@ -194,6 +221,8 @@ class AbstractReLU(nn.Module):
         self.W_lower[pos_mask] = prev_layer.W_lower[pos_mask]
         self.b_lower[pos_mask] = prev_layer.b_lower[pos_mask]
 
+        self.W_upper2 = torch.eye(self.n_in)
+        self.W_lower2 = torch.eye(self.n_in)
 
         # Crossing case: 
         if cross_mask.any():
@@ -232,6 +261,16 @@ class AbstractReLU(nn.Module):
             self.ub[cross_mask] = prev_layer.ub[cross_mask]
             # Lowerbound after a ReLU is always alpha*x
             self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
+
+            a2 = torch.zeros(self.n_in)
+            a2[cross_mask] = a
+            alpha2 = torch.zeros(self.n_in)
+            alpha2[cross_mask] = self.alpha[cross_mask]
+
+            self.W_upper2[cross_mask] = torch.diag(a2)[cross_mask]
+            self.b_upper2[cross_mask] = b
+            self.W_lower2[cross_mask] = torch.diag(alpha2)[cross_mask]
+            self.b_lower2[cross_mask] = 0. 
 
         return self
 
