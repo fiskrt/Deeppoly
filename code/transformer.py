@@ -14,7 +14,10 @@ class AbstractLayer(nn.Module):
         An abstract network is a composition of abstract layers 
         which are abstract transformers.
     """
-    pass
+
+    def backsub(self):
+        
+
 
 
 class AbstractAffine(nn.Module):

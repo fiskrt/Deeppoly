@@ -62,28 +62,32 @@ class DeepPolyNet(nn.Module):
         # and before relus incase we can get rid of crossing ReLU
 
         # TODO: move this into transformers? each transformer have backsub()
+        with torch.no_grad():
+            layer = self.abs_net[-1]
+            W_upper = layer.W_upper2.clone()
+            W_lower = layer.W_lower2.clone()
+            b_upper = layer.b_upper2.clone()
+            b_lower = layer.b_lower2.clone()
+            while layer.prev:
+                prev = layer.prev
+                M_u = W_upper >= 0
+                M_l = W_lower >= 0
+                b_upper = W_upper@prev.b_upper2 + b_upper
+                b_lower = W_lower@prev.b_lower2 + b_lower
+                W_upper = M_u*W_upper@prev.W_upper2 + ~M_u*W_upper@prev.W_lower2
+                W_lower = M_l*W_lower@prev.W_lower2 + ~M_l*W_lower@prev.W_upper2
 
-        layer = self.abs_net[-1]
-        W_upper = layer.W_upper2
-        W_lower = layer.W_lower2
-        while layer.prev:
-            prev = layer.prev
+                #print(f'At layer {layer} the upper constraints: {W_upper}')
+                layer = prev
+            # We reached the input layer and we can now calc the ub/lb with the
+            # input weights
             M_u = W_upper >= 0
             M_l = W_lower >= 0
-            W_upper = M_u*W_upper@prev.W_upper2 + ~M_u*W_upper@prev.W_lower2
-            W_lower = M_l*W_lower@prev.W_lower2 + ~M_l*W_lower@prev.W_lower2
+            ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb + b_upper
+            lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub + b_lower
 
-            print(f'At layer {layer} the upper constraints: {W_upper}')
-            layer = prev
-        # We reached the input layer and we can now calc the ub/lb with the
-        # input weights
-        M_u = W_upper >= 0
-        M_l = W_lower >= 0
-        ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb
-        lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub
-
-        print(f'lb: {lb}')
-        print(f'ub: {ub}')
+        #print(f'lb: {lb}')
+        #print(f'ub: {ub}')
         return ub, lb
 
 
@@ -160,8 +164,8 @@ if __name__=='__main__':
     #print(dp.parameters())
     print(dp)
     out = dp(inp)
-
-    dp.backsub()
+    
+    print(dp.backsub())
 
     #print('-'*20)
     #print(dp.parameters())
