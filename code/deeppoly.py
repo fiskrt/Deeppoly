@@ -32,11 +32,13 @@ class DeepPolyNet(nn.Module):
         return self.abs_net.forward(x)
 
     def verify(self):
-        self(self.input) # Dummy call to init parameters
-        ub, lb = self.backsub()
-        print('the backsubbed lb and ub:')
-        print(lb)
-        print(ub)
+        a = self(self.input) # Dummy call to init parameters
+        print(f'normal lb: {a.lb}')
+        #ub, lb = self.backsub()
+        #print('the backsubbed lb and ub:')
+        #print(lb)
+        #print(ub)
+        return False
         print('-'*50)
         optimizer = optim.SGD(self.parameters(), lr=0.1)
         print(self)
@@ -57,40 +59,6 @@ class DeepPolyNet(nn.Module):
         
         return False
     
-    def backsub(self):
-        # want to backsub at last layer
-        # and before relus incase we can get rid of crossing ReLU
-
-        # TODO: move this into transformers? each transformer have backsub()
-        with torch.no_grad():
-            layer = self.abs_net[-1]
-            W_upper = layer.W_upper2.clone()
-            W_lower = layer.W_lower2.clone()
-            b_upper = layer.b_upper2.clone()
-            b_lower = layer.b_lower2.clone()
-            while layer.prev:
-                prev = layer.prev
-                M_u = W_upper >= 0
-                M_l = W_lower >= 0
-                b_upper = W_upper@prev.b_upper2 + b_upper
-                b_lower = W_lower@prev.b_lower2 + b_lower
-                W_upper = M_u*W_upper@prev.W_upper2 + ~M_u*W_upper@prev.W_lower2
-                W_lower = M_l*W_lower@prev.W_lower2 + ~M_l*W_lower@prev.W_upper2
-
-                #print(f'At layer {layer} the upper constraints: {W_upper}')
-                layer = prev
-            # We reached the input layer and we can now calc the ub/lb with the
-            # input weights
-            M_u = W_upper >= 0
-            M_l = W_lower >= 0
-            ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb + b_upper
-            lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub + b_lower
-
-        #print(f'lb: {lb}')
-        #print(f'ub: {ub}')
-        return ub, lb
-
-
 
     def abstractize_network(self, net):
         """
@@ -129,6 +97,32 @@ class DeepPolyNet(nn.Module):
         ub_wrong_classes = output.ub[~target]
         loss = -(lb_correct - ub_wrong_classes.max())
 
+if __name__=='__main__':
+    from networks import get_network, get_net_name, NormalizedResnet
+    from verifier import get_net
+    from networks import *
+    device = 'cpu'
+    net = FullyConnected(device, 'mnist', 2, 1, [2, 2, 2])
+
+    W1 = torch.Tensor([[1,1,0,0], [1,-1,0,0]])
+    W2 = torch.Tensor([[1,1], [1,-1]])
+    W3 = torch.Tensor([[1,0], [0,1]])
+
+    b1 = torch.Tensor([0,0])
+    b2 = torch.Tensor([-0.5,0])
+    b3 = torch.Tensor([0,0])
+    my_params = [W1, b1, W2, b2, W3, b3]
+
+    for i,param in enumerate(net.parameters()):
+        param.data = my_params[i]
+        print(f'set param {i}')
+    
+    inp = torch.tensor([0, 0, 250,250])
+    dp = DeepPolyNet(net, inp, 1, 1)
+    out = dp(inp)
+    print()
+    exit()
+
 
 if __name__=='__main__':
     from networks import get_network, get_net_name, NormalizedResnet
@@ -164,8 +158,8 @@ if __name__=='__main__':
     #print(dp.parameters())
     print(dp)
     out = dp(inp)
-    
-    print(dp.backsub())
+
+    #print(dp.backsub())
 
     #print('-'*20)
     #print(dp.parameters())
