@@ -14,13 +14,39 @@ class AbstractLayer(nn.Module):
         An abstract network is a composition of abstract layers 
         which are abstract transformers.
     """
+    def __init__(self):
+        super().__init__()
 
     def backsub(self):
+        layer = self
+        W_upper = layer.W_upper2.clone()
+        W_lower = layer.W_lower2.clone()
+        b_upper = layer.b_upper2.clone()
+        b_lower = layer.b_lower2.clone()
+        while layer.prev:
+            prev = layer.prev
+            M_u = W_upper >= 0
+            M_l = W_lower >= 0
+            b_upper = M_u*W_upper@prev.b_upper2 + ~M_u*W_upper@prev.b_lower2 + b_upper
+            b_lower = M_l*W_lower@prev.b_lower2 + ~M_l*W_lower@prev.b_upper2 + b_lower
+#            b_lower = W_lower@prev.b_lower2 + b_lower
+            W_upper = (M_u*W_upper)@prev.W_upper2 + (~M_u*W_upper)@prev.W_lower2
+            W_lower = (M_l*W_lower)@prev.W_lower2 + (~M_l*W_lower)@prev.W_upper2
+
+            #print(f'At layer {layer} the upper constraints: {W_upper}')
+            layer = prev
+        # We reached the input layer and we can now calc the ub/lb with the
+        # input weights
+        M_u = W_upper >= 0
+        M_l = W_lower >= 0
+        ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb + b_upper
+        lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub + b_lower
+        return ub, lb
         
 
 
 
-class AbstractAffine(nn.Module):
+class AbstractAffine(AbstractLayer):
 
     def __init__(self, W, b):
         super().__init__()
@@ -70,6 +96,12 @@ class AbstractAffine(nn.Module):
         self.ub = (wu_pos*self.W_upper)@self.input_ub+(~wu_pos*self.W_upper)@self.input_lb+self.b_upper 
         self.lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
 
+        bsub = self.backsub()
+        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
+            print(f'BACKSUB and ub/lb are same in {self}')
+        else:
+            print(f'BACKSUB NOT same in {self}!!')
+
         return self
 
 class AbstractOutput(AbstractAffine):
@@ -94,10 +126,15 @@ class AbstractOutput(AbstractAffine):
         return 'AbstractOutput'
 
     def forward(self, prev_layer):
-        return super().forward(prev_layer)
+        l = super().forward(prev_layer)
+        print('calling backsub on last layer')
+        ub, lb = self.backsub()
+        print(f'backsub ub: {ub}')
+        print(f'backsub lb: {lb}')
+        return l
 
 
-class AbstractInput(nn.Module):
+class AbstractInput(AbstractLayer):
     """
         Input layer have no previous layer, but the bounds are given.
         We only have to clamp these to satisify normalization.
@@ -141,6 +178,7 @@ class AbstractInput(nn.Module):
         self.b_upper2 = torch.zeros(self.n_in)
         self.b_lower2 = torch.zeros(self.n_in)
         
+        # TODO: UNCOMENT@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         # TODO: input x have to be normalized!!!!!!!
         self.input_ub = torch.clamp(x+self.eps, max=1.)
         self.input_lb = torch.clamp(x-self.eps, min=0.)
@@ -153,7 +191,7 @@ class AbstractInput(nn.Module):
 
 
 
-class AbstractReLU(nn.Module):
+class AbstractReLU(AbstractLayer):
 
     def __init__(self, layer, last_layer):
         super().__init__()
@@ -180,6 +218,10 @@ class AbstractReLU(nn.Module):
         return 'AbstractReLU'
 
     def forward(self, prev_layer):    
+        print('calling backsub before ReLU layer')
+        ub, lb = prev_layer.backsub()
+        #print(f'backsub ub: {ub}')
+        #print(f'backsub lb: {lb}')
         self.prev = prev_layer
         # Before a ReLU layer we want to backsub so we maximize our chance of
         # getting a non-crossing ReLU.
@@ -224,8 +266,11 @@ class AbstractReLU(nn.Module):
         self.W_lower[pos_mask] = prev_layer.W_lower[pos_mask]
         self.b_lower[pos_mask] = prev_layer.b_lower[pos_mask]
 
-        self.W_upper2 = torch.eye(self.n_in)
-        self.W_lower2 = torch.eye(self.n_in)
+
+        arr = torch.zeros(self.n_in)
+        arr[pos_mask] = 1
+        self.W_upper2[pos_mask] = torch.diag(arr)[pos_mask]
+        self.W_lower2[pos_mask] = torch.diag(arr)[pos_mask]
 
         # Crossing case: 
         if cross_mask.any():
@@ -274,6 +319,22 @@ class AbstractReLU(nn.Module):
             self.b_upper2[cross_mask] = b
             self.W_lower2[cross_mask] = torch.diag(alpha2)[cross_mask]
             self.b_lower2[cross_mask] = 0. 
+        
+        bsub = self.backsub()
+        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
+            print(f'BACKSUB and ub/lb are same in {self}')
+        else:
+            print(f'BACKSUB NOT same in {self}!!')
 
         return self
+
+if __name__ == '__main__':
+    inp = torch.tensor([1, 2, 0, -3, 0])
+    abs_inp = AbstractInput(eps=1)
+    abs_relu = AbstractReLU(abs_inp, None)
+
+    res1 = abs_inp(inp)
+    res2 = abs_relu(res1)
+
+    print()
 
