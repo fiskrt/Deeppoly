@@ -85,9 +85,10 @@ class AbstractAffine(AbstractLayer):
         self.b_lower2 = self.b.clone()
 
         self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
+        self.b_upper = (w_pos*self.W)@prev_layer.b_upper+(~w_pos*self.W)@prev_layer.b_lower + self.b
+
         self.W_lower = (w_pos*self.W)@prev_layer.W_lower+(~w_pos*self.W)@prev_layer.W_upper
-        self.b_lower = self.W@prev_layer.b_lower+self.b
-        self.b_upper = self.W@prev_layer.b_upper+self.b
+        self.b_lower = (w_pos*self.W)@prev_layer.b_lower+(~w_pos*self.W)@prev_layer.b_upper + self.b
 
         # Since W_upper and W_lower contain the constraints in terms of the input layers
         # we use the input lower/upper bound. I.e this automatically does backsub to input layer. 
