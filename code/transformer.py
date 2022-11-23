@@ -44,8 +44,6 @@ class AbstractLayer(nn.Module):
         return ub, lb
         
 
-
-
 class AbstractAffine(AbstractLayer):
 
     def __init__(self, W, b):
@@ -92,10 +90,12 @@ class AbstractAffine(AbstractLayer):
 
         # Since W_upper and W_lower contain the constraints in terms of the input layers
         # we use the input lower/upper bound. I.e this automatically does backsub to input layer. 
-        wu_pos = self.W_upper >= 0.
-        wl_pos = self.W_lower >= 0.
-        self.ub = (wu_pos*self.W_upper)@self.input_ub+(~wu_pos*self.W_upper)@self.input_lb+self.b_upper 
-        self.lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
+        wu_pos = self.W_upper2 >= 0.
+        wl_pos = self.W_lower2 >= 0.
+        #self.ub = (wu_pos*self.W_upper)@self.input_ub+(~wu_pos*self.W_upper)@self.input_lb+self.b_upper 
+        #self.lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
+        self.ub = (wu_pos*self.W_upper2)@prev_layer.ub+(~wu_pos*self.W_upper2)@prev_layer.lb+self.b_upper2 
+        self.lb = (wl_pos*self.W_lower2)@prev_layer.lb+(~wl_pos*self.W_lower2)@prev_layer.ub+self.b_lower2 
 
         bsub = self.backsub()
         if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
@@ -221,6 +221,8 @@ class AbstractReLU(AbstractLayer):
     def forward(self, prev_layer):    
         print('calling backsub before ReLU layer')
         ub, lb = prev_layer.backsub()
+        prev_layer.ub = ub
+        prev_layer.lb = lb
         #print(f'backsub ub: {ub}')
         #print(f'backsub lb: {lb}')
         self.prev = prev_layer
@@ -285,12 +287,12 @@ class AbstractReLU(AbstractLayer):
                 if not self.inited:
                     self.inited = ~self.inited
                     alpha = torch.zeros(self.n_out)
-                    #alpha[prev_layer.ub[cross_mask] > -prev_layer.lb[cross_mask]] = 1.
+                    alpha[prev_layer.ub > -prev_layer.lb] = 1.
         #            self.alpha.materialize(alpha.shape)
         #            self.alpha.data = alpha #= Parameter(self.alpha)
         #            self.alpha = torch.tensor(alpha, requires_grad=True)
                     self.alpha = Parameter(alpha)
-                    print(f'alpha from trans: {cross_mask.sum()}')
+                    print(f'Number of crossing ReLUs: {cross_mask.sum()}')
                 if self.inited:
                     self.alpha.data = self.alpha.clamp(0,1)
 
