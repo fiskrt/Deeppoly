@@ -17,14 +17,13 @@ class AbstractLayer(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def backsub(self, grad=True):
-        #with torch.no_grad()
+    def backsub(self):
         layer = self
         W_upper = layer.W_upper2.clone()
         W_lower = layer.W_lower2.clone()
         b_upper = layer.b_upper2.clone()
         b_lower = layer.b_lower2.clone()
-        #print('---------------backsub---------------------')
+
         best_lb = self.lb
         best_ub = self.ub
         while layer.prev:
@@ -126,13 +125,13 @@ class AbstractAffine(AbstractLayer):
         self.ub = (wu_pos*self.W_upper2)@prev_layer.ub+(~wu_pos*self.W_upper2)@prev_layer.lb+self.b_upper2 
         self.lb = (wl_pos*self.W_lower2)@prev_layer.lb+(~wl_pos*self.W_lower2)@prev_layer.ub+self.b_lower2 
 
-        bsub = self.backsub()
-        self.bsub_ub = bsub[0]
-        self.bsub_lb = bsub[1]
-        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
-            print(f'BACKSUB and ub/lb are same in {self}')
-        else:
-            print(f'BACKSUB NOT same in {self}!!')
+        #bsub = self.backsub()
+        #self.bsub_ub = bsub[0]
+        #self.bsub_lb = bsub[1]
+        #if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
+        #    print(f'BACKSUB and ub/lb are same in {self}')
+        #else:
+        #    print(f'BACKSUB NOT same in {self}!!')
 
         return self
 
@@ -150,19 +149,15 @@ class AbstractOutput(AbstractAffine):
         M = torch.cat((M[:pred], M[pred+1:]))
 
         #print(f'M: {M}')
-        # bias is always zero in output layer!
+        # bias is always zero in output layer, i.e x_best-x_j + 0
         super().__init__(M@W, M@b)
-        #self.pred = pred 
 
     def __str__(self):
         return 'AbstractOutput'
 
     def forward(self, prev_layer):
         l = super().forward(prev_layer)
-        print('calling backsub on last layer')
-        ub, lb = self.backsub()
-        print(f'backsub ub: {ub}')
-        print(f'backsub lb: {lb}')
+        self.ub, self.lb = self.backsub()
         return l
 
 
@@ -346,8 +341,6 @@ class AbstractNormalize(AbstractLayer):
         return self
         
 
-
-
 class AbstractReLU(AbstractLayer):
 
     def __init__(self, layer, last_layer):
@@ -375,12 +368,12 @@ class AbstractReLU(AbstractLayer):
         return 'AbstractReLU'
 
     def forward(self, prev_layer):    
-        print('calling backsub before ReLU layer')
+        #print('calling backsub before ReLU layer')
         ub, lb = prev_layer.backsub()
-        if (ub == prev_layer.ub).all() and (lb == prev_layer.lb).all():
-            print(f'BACKSUB and ub/lb are same before {self}')
-        else:
-            print(f'BACKSUB NOT same before {self}!!')
+        #if (ub == prev_layer.ub).all() and (lb == prev_layer.lb).all():
+        #    print(f'BACKSUB and ub/lb are same before {self}')
+        #else:
+        #    print(f'BACKSUB NOT same before {self}!!')
         prev_layer.ub = ub
         prev_layer.lb = lb
         #print(f'backsub ub: {ub}')
@@ -402,9 +395,6 @@ class AbstractReLU(AbstractLayer):
         cross_mask = ~(neg_mask | pos_mask)
 
         #print(f'Number of crossing ReLUs: {cross_mask.sum()}')
-        #print(f'Pos relu at positions: {pos_mask} with incoming lb/ub: {prev_layer.lb[pos_mask]}/{prev_layer.ub[pos_mask]}')
-        #print(f'neg relu at positions: {neg_mask} with incoming lb/ub: {prev_layer.lb[neg_mask]}/{prev_layer.ub[neg_mask]}')
-        #print(f'Crossing relu at positions: {cross_mask} with incoming lb/ub: {prev_layer.lb[cross_mask]}/{prev_layer.ub[cross_mask]}')
 
         # Negative case: constraints are just 0
         self.ub = torch.zeros(self.n_out)
@@ -448,15 +438,11 @@ class AbstractReLU(AbstractLayer):
                     self.inited = ~self.inited
                     alpha = 0.* torch.ones(self.n_out)
                     alpha[prev_layer.ub > -prev_layer.lb] = 1.
-                    #print(f'inited alpha to: {alpha}')
-        #            self.alpha.materialize(alpha.shape)
-        #            self.alpha.data = alpha #= Parameter(self.alpha)
-        #            self.alpha = torch.tensor(alpha, requires_grad=True)
                     self.alpha = Parameter(alpha)
-                    print(f'Number of crossing ReLUs: {cross_mask.sum()}')
                 # remove if here? useless?
-                if self.inited:
-                    self.alpha.data = self.alpha.clamp(0,1)
+                self.alpha.data = self.alpha.clamp(0,1)
+
+            #print(f'Number of crossing ReLUs: {cross_mask.sum()}')
 
     #        self.alpha = torch.zeros(last_layer.b.shape, requires_grad=True)
             # The ReLU upperbound will be some a^Tx+b
@@ -473,6 +459,7 @@ class AbstractReLU(AbstractLayer):
 
             # After a ReLU backsub cannot help us, so we only need the ub/lb from previous layer
             self.ub[cross_mask] = prev_layer.ub[cross_mask]
+            #self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
             # Lowerbound after a ReLU is always alpha*x
             #self.lb[cross_mask] = self.alpha[cross_mask]*(self.W_lower[cross_mask]@prev_layer.lb[cross_mask])
             # when alpha>0 so we get lower constrain x2>= alpha*x, we must backsub to get the real lowerbound
@@ -495,11 +482,11 @@ class AbstractReLU(AbstractLayer):
             self.W_lower2[cross_mask] = torch.diag(alpha2)[cross_mask]
             self.b_lower2[cross_mask] = 0. 
         
-        bsub = self.backsub()
-        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
-            print(f'BACKSUB and ub/lb are same in {self}')
-        else:
-            print(f'BACKSUB NOT same in {self}!!')
+#        bsub = self.backsub()
+#        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
+#            print(f'BACKSUB and ub/lb are same in {self}')
+#        else:
+#            print(f'BACKSUB NOT same in {self}!!')
 
         return self
 

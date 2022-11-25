@@ -50,21 +50,15 @@ def get_net(net, net_name):
 
 
 def analyze(net, inputs, eps, true_label):
-    print(inputs.shape)
-    inputs = inputs.flatten()
-    print(inputs.shape)
-    print(inputs.max())
-    print(inputs.min())
-    print(f'true lab: {true_label}')
-
     import time
     start = time.time()
     for _ in range(1):
         dp = DeepPolyNet(net, inputs, eps, true_label)
         res = dp.verify()
+
         if res:
             break
-    print(f'Verifying took: {time.time()-start}')
+    #print(f'Verifying took: {time.time()-start}')
 
     return res
 
@@ -95,4 +89,3 @@ if __name__ == '__main__':
     main()
 
     n = get_net('net8', get_net_name('net8'))
-    #print(n)

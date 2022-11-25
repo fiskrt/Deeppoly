@@ -33,40 +33,32 @@ class DeepPolyNet(nn.Module):
 
     def verify(self):
         out = self(self.input) # Dummy call to init parameters
-        print(f'normal lb: {out.lb}')
-        #print(out.lb[self.true_label]>out.ub)
-        #print(out.ub)
-        #print(out.bsub_lb[self.true_label]>out.bsub_ub)
-        #print(out.bsub_lb)
-        print(out.bsub_ub<=out.ub)
-        print(out.bsub_lb>=out.lb)
-        #return 
-        #ub, lb = self.backsub()
-        #print('the backsubbed lb and ub:')
-        #print(lb)
-        #print(ub)
-        return False
-        print('-'*50)
+        #print(f'normal lb: {out.lb}')
+#        print(f'bsub lb: {out.bsub_lb}')
+        #print(out.bsub_ub<=out.ub)
+        #print(out.bsub_lb>=out.lb)
+
         optimizer = optim.SGD(self.parameters(), lr=0.5)
-        #print(self)
-        for i in range(3):
+        verified = False
+        for i in range(30):
             optimizer.zero_grad()
             out = self(self.input)
-            if i ==0:
-                print(out.lb)
-            # change loss to sum/mean of all negative?
-#            loss = -out.lb[out.lb<0].mean()
+#            if i ==0:
+#                print(out.lb)
+
             loss = -out.lb.mean()
             loss.backward()
-            if i%200==0:
-                print(out.lb)
-                #print([p for p in self.parameters()])
+#            if i%20==0:
+#                print(out.lb)
+
             optimizer.step()
             if (out.lb>=0).all():
-                return True
-        print(f'Alpha final: {list(self.parameters())[0].data}')
+                verified = True
+                #return True
+      #  print(out.lb)
+      #  print(f'Alpha final: {list(self.parameters())[0].data}')
         
-        return False
+        return verified
     
 
     def abstractize_network(self, net):
