@@ -3,6 +3,7 @@ import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
 from transformer import *
+import networks
 
 
 
@@ -19,7 +20,6 @@ class DeepPolyNet(nn.Module):
         #print(f'orignal net outp: {orig_net(inp)}')
         #self.target = orig_net(inp).squeeze()
         self.true_label = true_label # the actual number, not the index!
-        assert inp.dim() == 1, "Input is not 1d!"
         self.input = inp
 
         self.abs_net = self.abstractize_network(orig_net)
@@ -32,30 +32,39 @@ class DeepPolyNet(nn.Module):
         return self.abs_net.forward(x)
 
     def verify(self):
-        a = self(self.input) # Dummy call to init parameters
-        print(f'normal lb: {a.lb}')
+        out = self(self.input) # Dummy call to init parameters
+        print(f'normal lb: {out.lb}')
+        #print(out.lb[self.true_label]>out.ub)
+        #print(out.ub)
+        #print(out.bsub_lb[self.true_label]>out.bsub_ub)
+        #print(out.bsub_lb)
+        print(out.bsub_ub<=out.ub)
+        print(out.bsub_lb>=out.lb)
+        #return 
         #ub, lb = self.backsub()
         #print('the backsubbed lb and ub:')
         #print(lb)
         #print(ub)
         return False
         print('-'*50)
-        optimizer = optim.SGD(self.parameters(), lr=0.1)
-        print(self)
-        for i in range(1000):
+        optimizer = optim.SGD(self.parameters(), lr=0.5)
+        #print(self)
+        for i in range(3):
             optimizer.zero_grad()
             out = self(self.input)
             if i ==0:
                 print(out.lb)
             # change loss to sum/mean of all negative?
-            loss = -out.lb[out.lb<0].mean()
+#            loss = -out.lb[out.lb<0].mean()
+            loss = -out.lb.mean()
             loss.backward()
-            if i%300==0:
+            if i%200==0:
                 print(out.lb)
                 #print([p for p in self.parameters()])
             optimizer.step()
             if (out.lb>=0).all():
                 return True
+        print(f'Alpha final: {list(self.parameters())[0].data}')
         
         return False
     
@@ -66,23 +75,24 @@ class DeepPolyNet(nn.Module):
             into affine layers which allows for shape propagation.
         """
         layers = [AbstractInput(self.eps)]
-        last = None
-        #print('layers:')
         for m in net.modules():
-            #print(m)
             if isinstance(m, nn.Conv2d):
                 pass
             elif isinstance(m, nn.Linear):
-        #        print(m)
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
-                last = m
             elif isinstance(m, nn.ReLU):
-        #        print(m)
                 layers.append(AbstractReLU(m, layers[-1]))
-        
-        print('-'*50)
+           # elif isinstance(m, nn.Flatten):
+           #     layers.append(AbstractFlatten())
+            elif isinstance(m, networks.Normalization):
+                layers.append(AbstractNormalize(m.mean, m.sigma))
+
+        assert isinstance(layers[0], AbstractInput) 
+        assert isinstance(layers[1], AbstractNormalize) 
+#        assert isinstance(layers[2], AbstractFlatten) 
         assert isinstance(layers[-1], AbstractAffine), "Final layer is not affine!"
         layers[-1] = AbstractOutput(layers[-1].W, layers[-1].b, self.true_label)
+
         return nn.Sequential(*layers)
 
 
@@ -109,6 +119,7 @@ if __name__=='__main__':
     W3 = torch.Tensor([[1,0], [0,1]])
 
     b1 = torch.Tensor([0,0])
+    #b1 = torch.Tensor([1,1.5])
     b2 = torch.Tensor([-0.5,0])
     b3 = torch.Tensor([0,0])
     my_params = [W1, b1, W2, b2, W3, b3]
@@ -120,7 +131,8 @@ if __name__=='__main__':
     inp = torch.tensor([0, 0, 250,250])
     dp = DeepPolyNet(net, inp, 1, 1)
     out = dp(inp)
-    print()
+    print(out.lb)
+    print(out.ub)
     exit()
 
 

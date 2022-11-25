@@ -17,14 +17,27 @@ class AbstractLayer(nn.Module):
     def __init__(self):
         super().__init__()
 
-    def backsub(self):
+    def backsub(self, grad=True):
+        #with torch.no_grad()
         layer = self
         W_upper = layer.W_upper2.clone()
         W_lower = layer.W_lower2.clone()
         b_upper = layer.b_upper2.clone()
         b_lower = layer.b_lower2.clone()
+        #print('---------------backsub---------------------')
+        best_lb = self.lb
+        best_ub = self.ub
         while layer.prev:
             prev = layer.prev
+            
+            M_u = W_upper >= 0
+            M_l = W_lower >= 0
+            ub = M_u*W_upper@prev.ub + ~M_u*W_upper@prev.lb + b_upper
+            lb = M_l*W_lower@prev.lb + ~M_l*W_lower@prev.ub + b_lower
+            best_lb = torch.max(best_lb, lb)
+            best_ub = torch.min(best_ub, ub)
+
+
             M_u = W_upper >= 0
             M_l = W_lower >= 0
             b_upper = M_u*W_upper@prev.b_upper2 + ~M_u*W_upper@prev.b_lower2 + b_upper
@@ -32,6 +45,14 @@ class AbstractLayer(nn.Module):
 #            b_lower = W_lower@prev.b_lower2 + b_lower
             W_upper = (M_u*W_upper)@prev.W_upper2 + (~M_u*W_upper)@prev.W_lower2
             W_lower = (M_l*W_lower)@prev.W_lower2 + (~M_l*W_lower)@prev.W_upper2
+            #print(f'At layer {layer}:') 
+            #print(f'W_upper: {W_upper.data}')
+            #print(f'b_upper: {b_upper.data}')
+            #print(f'W: {layer.W_upper2.data}')
+            #print(f'W_lower: {W_lower}')
+            
+            #continously check if we have good enough bounds, i.e if lb>0 then we can stop?
+
 
             #print(f'At layer {layer} the upper constraints: {W_upper}')
             layer = prev
@@ -41,7 +62,12 @@ class AbstractLayer(nn.Module):
         M_l = W_lower >= 0
         ub = M_u*W_upper@layer.ub + ~M_u*W_upper@layer.lb + b_upper
         lb = M_l*W_lower@layer.lb + ~M_l*W_lower@layer.ub + b_lower
-        return ub, lb
+        best_lb = torch.max(best_lb, lb)
+        best_ub = torch.min(best_ub, ub)
+        #print('---------------backsubend---------------------')
+        #print(f'best_lb: {best_lb}')
+        #print(f'best_ub: {best_ub}')
+        return best_ub, best_lb
         
 
 class AbstractAffine(AbstractLayer):
@@ -90,14 +116,19 @@ class AbstractAffine(AbstractLayer):
 
         # Since W_upper and W_lower contain the constraints in terms of the input layers
         # we use the input lower/upper bound. I.e this automatically does backsub to input layer. 
+        # @@@@@ change to W_upper2 etc.
         wu_pos = self.W_upper2 >= 0.
         wl_pos = self.W_lower2 >= 0.
+        # @@@@@ Lowerbound in terms of input layer
         #self.ub = (wu_pos*self.W_upper)@self.input_ub+(~wu_pos*self.W_upper)@self.input_lb+self.b_upper 
         #self.lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
+        # @@@@@ bounds in term of previous layer
         self.ub = (wu_pos*self.W_upper2)@prev_layer.ub+(~wu_pos*self.W_upper2)@prev_layer.lb+self.b_upper2 
         self.lb = (wl_pos*self.W_lower2)@prev_layer.lb+(~wl_pos*self.W_lower2)@prev_layer.ub+self.b_lower2 
 
         bsub = self.backsub()
+        self.bsub_ub = bsub[0]
+        self.bsub_lb = bsub[1]
         if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
             print(f'BACKSUB and ub/lb are same in {self}')
         else:
@@ -164,31 +195,156 @@ class AbstractInput(AbstractLayer):
         return 'AbstractInput'
     
     def forward(self, x):
-        #self.x = x
-        assert x.dim() == 1, 'Dimension should be one in input!'
-        self.n_in =x.shape[0]
-        self.n_out = self.n_in
-        self.W_lower = torch.eye(self.n_in)
-        self.W_upper = torch.eye(self.n_in)
-        self.b_lower = torch.zeros(self.n_in)
-        self.b_upper = torch.zeros(self.n_in)
+        # Remove batch dimension
+        x = x.squeeze(0)
+        assert x.dim() == 3, 'Dimension should be 3 in input!'
+        # Cheat and just flatten the the image HxW to HW immediately
+        x = x.flatten(start_dim=1)
+        self.input_ub = torch.clamp(x+self.eps, min=0., max=1.)
+        self.input_lb = torch.clamp(x-self.eps, min=0., max=1.) # should be zero
 
-        #remove
-        self.W_lower2 = torch.eye(self.n_in)
-        self.W_upper2 = torch.eye(self.n_in)
-        self.b_upper2 = torch.zeros(self.n_in)
-        self.b_lower2 = torch.zeros(self.n_in)
+        self.ub = self.input_ub.clone()
+        self.lb = self.input_lb.clone()
+
+        #self.x = self.norm_layer(x)
+        #self.x = self.x.flatten()
+        #self.n_in = self.x.shape[0]
+        #self.n_out = self.n_in
+        #self.W_lower = torch.eye(self.n_in)
+        #self.W_upper = torch.eye(self.n_in)
+        #self.b_lower = torch.zeros(self.n_in)
+        #self.b_upper = torch.zeros(self.n_in)
+
+        ##remove
+        #self.W_lower2 = torch.eye(self.n_in)
+        #self.W_upper2 = torch.eye(self.n_in)
+        #self.b_upper2 = torch.zeros(self.n_in)
+        #self.b_lower2 = torch.zeros(self.n_in)
         
         # TODO: UNCOMENT@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
         # TODO: input x have to be normalized!!!!!!!
-        self.input_ub = torch.clamp(x+self.eps, max=1.)
-        self.input_lb = torch.clamp(x-self.eps, min=0.)
-        self.ub = self.input_ub.clone()
-        self.lb = self.input_lb.clone()
 
         #print(f'Inited input layer: ub/lb {self.ub}/{self.lb}')
 
         return self
+
+class AbstractFlatten(AbstractLayer):
+    """
+        Takes BxWxH-> W*H
+
+        TODO: set prev=None so this is seen as 'first layer'?
+
+        Flatten might not copy the value, is this bad?
+    """
+    def __init__(self):
+        super().__init__()
+    
+    def forward(self, prev_layer):
+        # want backsub to stop here?
+        assert False
+        self.prev = None
+        self.input_ub = prev_layer.input_ub.flatten()
+        self.input_lb = prev_layer.input_lb.flatten()
+
+        self.n_out = self.input_ub.shape[0]
+
+        self.W_upper = prev_layer.W_upper.flatten()
+        self.W_lower = prev_layer.W_lower.flatten()
+
+        self.b_upper = prev_layer.b_upper.flatten()
+        self.b_lower = prev_layer.b_lower.flatten()
+
+        self.ub = prev_layer.ub.flatten()
+        self.lb = prev_layer.lb.flatten()
+
+        self.W_upper2 = self.W_upper.clone()
+        self.W_lower2 = self.W_lower.clone()
+        self.b_upper2 = self.b_upper.clone()
+        self.b_lower2 = self.b_lower.clone()
+
+        return self
+
+
+class AbstractNormalize(AbstractLayer):
+    def __init__(self, mean, sigma):
+        super().__init__()
+        self.prev = None
+
+        self.mean = mean
+        self.sigma = sigma
+
+        self.ub = None
+        self.lb = None
+        self.input_ub = None
+        self.input_lb = None
+
+        self.n_in = None
+        self.n_out = None
+
+        # wrong inits?
+        self.W_upper = None
+        self.b_upper = None
+        self.W_lower = None
+        self.b_lower = None
+    
+    def forward(self, prev_layer):
+        # set this as first layer?
+        self.prev = None
+        #self.input_ub = prev_layer.input_ub
+        #self.input_lb = prev_layer.input_lb
+
+        #self.n_in = prev_layer.n_out
+        #self.n_out = self.n_in
+        prev_shape = prev_layer.lb.shape
+        if prev_shape[0] == 1:
+            m = self.mean.squeeze().unsqueeze(0)
+            s = self.sigma.squeeze().unsqueeze(0)
+            self.ub = (1/s)*prev_layer.ub.squeeze(0)-(m/s)
+            self.lb = (1/s)*prev_layer.lb.squeeze(0)-(m/s)
+            self.W_upper = torch.eye(self.ub.shape[0])
+            self.W_lower = torch.eye(self.ub.shape[0])
+            self.b_upper = torch.zeros(self.ub.shape[0])
+            self.b_lower = torch.zeros(self.ub.shape[0])
+            assert self.ub.dim() == 1
+        elif prev_shape[0] == 3:
+            m = self.mean.squeeze()
+            s = self.sigma.squeeze()
+            self.ub = ((1/s)[:, None]*prev_layer.ub - (m/s)[:, None]).flatten()
+            self.lb = ((1/s)[:, None]*prev_layer.lb - (m/s)[:, None]).flatten()
+            self.W_upper = torch.eye(self.ub.shape[0])
+            self.W_lower = torch.eye(self.ub.shape[0])
+            self.b_upper = torch.zeros(self.ub.shape[0])
+            self.b_lower = torch.zeros(self.ub.shape[0])
+        else:
+            assert False, 'Number of channels must be 1 or 3!'
+
+        #I = torch.eye(prev_shape[1])
+        ## store just the diagonals C x WH, otherwise too big
+        ## then in Flatten we unroll and then matrix=diag(unrolled)
+        #self.W_upper = torch.einsum('ij,k->kij', I, 1.0/s)
+        #self.W_lower = self.W_upper.clone() 
+        #self.b_upper = -(m/s)[:,None]*torch.ones((prev_shape[0],prev_shape[1]))
+        #self.b_lower = self.b_upper.clone()
+
+        ## just change ub/lb to new
+
+        ## W upper and b is just same numbers so can we use some broadcasting to
+        ## calculate ub/lb. Combine this layer and flatten?
+
+        ## store only diagonal in W_upper, we can
+        #self.ub = self.W_upper
+        #self.ub = self.W_upper@prev_layer.ub+self.b_upper
+        #self.lb = self.W_lower@prev_layer.lb+self.b_lower
+
+#        self.input_lb = 
+
+        self.W_upper2 = self.W_upper
+        self.W_lower2 = self.W_lower
+        self.b_upper2 = self.b_upper
+        self.b_lower2 = self.b_lower
+
+        return self
+        
 
 
 
@@ -221,6 +377,10 @@ class AbstractReLU(AbstractLayer):
     def forward(self, prev_layer):    
         print('calling backsub before ReLU layer')
         ub, lb = prev_layer.backsub()
+        if (ub == prev_layer.ub).all() and (lb == prev_layer.lb).all():
+            print(f'BACKSUB and ub/lb are same before {self}')
+        else:
+            print(f'BACKSUB NOT same before {self}!!')
         prev_layer.ub = ub
         prev_layer.lb = lb
         #print(f'backsub ub: {ub}')
@@ -286,13 +446,15 @@ class AbstractReLU(AbstractLayer):
             with torch.no_grad():
                 if not self.inited:
                     self.inited = ~self.inited
-                    alpha = torch.zeros(self.n_out)
+                    alpha = 0.* torch.ones(self.n_out)
                     alpha[prev_layer.ub > -prev_layer.lb] = 1.
+                    #print(f'inited alpha to: {alpha}')
         #            self.alpha.materialize(alpha.shape)
         #            self.alpha.data = alpha #= Parameter(self.alpha)
         #            self.alpha = torch.tensor(alpha, requires_grad=True)
                     self.alpha = Parameter(alpha)
                     print(f'Number of crossing ReLUs: {cross_mask.sum()}')
+                # remove if here? useless?
                 if self.inited:
                     self.alpha.data = self.alpha.clamp(0,1)
 
@@ -302,16 +464,26 @@ class AbstractReLU(AbstractLayer):
             a = prev_layer.ub[cross_mask] / (prev_layer.ub[cross_mask]-prev_layer.lb[cross_mask])
             b = -prev_layer.lb[cross_mask] * a
             self.W_upper[cross_mask] = torch.einsum('i,ij->ij', a, prev_layer.W_upper[cross_mask])
-            self.b_upper[cross_mask] = prev_layer.b_upper[cross_mask] + b
+            self.b_upper[cross_mask] = a*prev_layer.b_upper[cross_mask] + b
 
             # Calculate lowerbound with alpha parameterization alpha*x
             self.W_lower[cross_mask] = torch.einsum('i,ij->ij', self.alpha[cross_mask], prev_layer.W_lower[cross_mask])
-            self.b_lower[cross_mask] = prev_layer.b_upper[cross_mask]
+            #self.b_lower[cross_mask] = prev_layer.b_lower[cross_mask]
+
 
             # After a ReLU backsub cannot help us, so we only need the ub/lb from previous layer
             self.ub[cross_mask] = prev_layer.ub[cross_mask]
             # Lowerbound after a ReLU is always alpha*x
-            self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
+            #self.lb[cross_mask] = self.alpha[cross_mask]*(self.W_lower[cross_mask]@prev_layer.lb[cross_mask])
+            # when alpha>0 so we get lower constrain x2>= alpha*x, we must backsub to get the real lowerbound
+            #wl_pos = self.W_lower>= 0
+            #temp_lb = (wl_pos*self.W_lower)@self.input_lb+(~wl_pos*self.W_lower)@self.input_ub+self.b_lower 
+            #self.lb[cross_mask] = temp_lb[cross_mask] # dont have to mult by alpha since, i use W_lower
+            # still incorrect, if alpha=0, the lb should be 0
+
+            # Or should it just be 0, since even if we have nonzero alpha, we know that output
+            # from relu is always >= 0
+
 
             a2 = torch.zeros(self.n_in)
             a2[cross_mask] = a
