@@ -1,11 +1,14 @@
+import numpy as np
 import torch
 import torch.nn.functional as F
 import torch.nn as nn
 import torch.optim as optim
+from numpy.lib.stride_tricks import as_strided
+from scipy import linalg
+
+from code.toeplitz_ops import multiple_channel_with_stride
 from transformer import *
 import networks
-
-
 
 class DeepPolyNet(nn.Module):
     """
@@ -66,10 +69,17 @@ class DeepPolyNet(nn.Module):
             Turn convolutions, input normalization, batch norm
             into affine layers which allows for shape propagation.
         """
+        prev_shape = None
+        first_conv = True
         layers = [AbstractInput(self.eps)]
         for m in net.modules():
             if isinstance(m, nn.Conv2d):
-                pass
+                if first_conv:
+                    input_shape = self.input.shape
+                else:
+                    input_shape = prev_shape
+                prev_shape = (m.out_channels, input_shape[1]//m.stride, input_shape[2]//m.stride)
+                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[1], input_shape[2]), stride=m.stride[0], padding=m.padding), torch.repeat_interleave(m.bias.data, (input_shape[1]//m.stride[0]) * (input_shape[2]//m.stride[0]))))
             elif isinstance(m, nn.Linear):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):
@@ -98,6 +108,9 @@ class DeepPolyNet(nn.Module):
         lb_correct = output.lb[target]
         ub_wrong_classes = output.ub[~target]
         loss = -(lb_correct - ub_wrong_classes.max())
+        return loss
+
+
 
 if __name__=='__main__':
     from networks import get_network, get_net_name, NormalizedResnet
@@ -119,7 +132,7 @@ if __name__=='__main__':
     for i,param in enumerate(net.parameters()):
         param.data = my_params[i]
         print(f'set param {i}')
-    
+
     inp = torch.tensor([0, 0, 250,250])
     dp = DeepPolyNet(net, inp, 1, 1)
     out = dp(inp)
