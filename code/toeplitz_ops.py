@@ -57,7 +57,7 @@ def multiple_channel(kernel, input_size, padding=1):
 
     return weights
 
-
+@staticmethod
 def multiple_channel_with_stride(kernel, input_size, stride, padding=1):
     r, m, n = input_size
     t = kernel.shape[0]

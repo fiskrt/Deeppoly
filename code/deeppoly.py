@@ -1,12 +1,7 @@
-import numpy as np
-import torch
 import torch.nn.functional as F
-import torch.nn as nn
 import torch.optim as optim
-from numpy.lib.stride_tricks import as_strided
-from scipy import linalg
 
-from code.toeplitz_ops import multiple_channel_with_stride
+from toeplitz_ops import multiple_channel_with_stride
 from transformer import *
 import networks
 
@@ -74,12 +69,13 @@ class DeepPolyNet(nn.Module):
         layers = [AbstractInput(self.eps)]
         for m in net.modules():
             if isinstance(m, nn.Conv2d):
+                stride = m.stride[0]
                 if first_conv:
                     input_shape = self.input.shape
                 else:
                     input_shape = prev_shape
-                prev_shape = (m.out_channels, input_shape[1]//m.stride, input_shape[2]//m.stride)
-                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[1], input_shape[2]), stride=m.stride[0], padding=m.padding), torch.repeat_interleave(m.bias.data, (input_shape[1]//m.stride[0]) * (input_shape[2]//m.stride[0]))))
+                prev_shape = (m.out_channels, input_shape[1]//stride, input_shape[2]//stride)
+                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[1], input_shape[2]), stride=stride, padding=m.padding[0]), torch.repeat_interleave(m.bias.data, (input_shape[1]//stride) * (input_shape[2]//stride))))
             elif isinstance(m, nn.Linear):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):
