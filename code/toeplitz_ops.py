@@ -68,9 +68,9 @@ def multiple_channel_with_stride(kernel, input_size, stride, padding=1):
 
     choose_elems = np.zeros(n_out)
     choose_elems[::stride] = 1
-    mask = np.zeros((m_out, n_out))
+    mask = np.zeros((m_out, n_out), dtype='float32')
     mask[::stride] = choose_elems
     mask = np.reshape(mask, (-1))
     mask = np.tile(mask, t)
     weights = weights[mask > 0]
-    return torch.from_numpy(weights)
+    return torch.from_numpy(weights.astype('float32'))

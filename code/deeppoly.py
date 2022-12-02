@@ -72,10 +72,11 @@ class DeepPolyNet(nn.Module):
                 stride = m.stride[0]
                 if first_conv:
                     input_shape = self.input.shape
+                    first_conv = False
                 else:
                     input_shape = prev_shape
-                prev_shape = (m.out_channels, input_shape[1]//stride, input_shape[2]//stride)
-                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[1], input_shape[2]), stride=stride, padding=m.padding[0]), torch.repeat_interleave(m.bias.data, (input_shape[1]//stride) * (input_shape[2]//stride))))
+                prev_shape = (m.out_channels, input_shape[-2]//stride, input_shape[-1]//stride)
+                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[-2], input_shape[-1]), stride=stride, padding=m.padding[0]), torch.repeat_interleave(m.bias.data, (input_shape[-2]//stride) * (input_shape[-1]//stride))))
             elif isinstance(m, nn.Linear):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):
