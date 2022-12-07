@@ -220,3 +220,5 @@ class ResNet(nn.Sequential):
             self.in_planes = planes * block.expansion
         return nn.Sequential(*layers), cur_dim
 
+# Write a Bash shell script to retrieve the latest tweets from an account
+

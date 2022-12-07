@@ -1,11 +1,9 @@
-import torch
 import torch.nn.functional as F
-import torch.nn as nn
 import torch.optim as optim
+
+from conv2affine import conv_to_affine
 from transformer import *
 import networks
-
-
 
 class DeepPolyNet(nn.Module):
     """
@@ -20,7 +18,13 @@ class DeepPolyNet(nn.Module):
         #print(f'orignal net outp: {orig_net(inp)}')
         #self.target = orig_net(inp).squeeze()
         self.true_label = true_label # the actual number, not the index!
-        self.input = inp
+        if inp.dim() == 3:
+            self.input = inp
+        elif inp.dim() == 4:
+            # Remove batch dimension
+            self.input = inp.squeeze(0)
+        else:
+            assert False, 'Input shape error'
 
         self.abs_net = self.abstractize_network(orig_net)
 
@@ -66,10 +70,13 @@ class DeepPolyNet(nn.Module):
             Turn convolutions, input normalization, batch norm
             into affine layers which allows for shape propagation.
         """
+        # keep track of the shape (num_channels, H, W)
+        prev_shape = self.input.shape
         layers = [AbstractInput(self.eps)]
         for m in net.modules():
             if isinstance(m, nn.Conv2d):
-                pass
+                W, b, prev_shape = conv_to_affine(m, prev_shape)
+                layers.append(AbstractAffine(W,b))
             elif isinstance(m, nn.Linear):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):
@@ -98,6 +105,9 @@ class DeepPolyNet(nn.Module):
         lb_correct = output.lb[target]
         ub_wrong_classes = output.ub[~target]
         loss = -(lb_correct - ub_wrong_classes.max())
+        return loss
+
+
 
 if __name__=='__main__':
     from networks import get_network, get_net_name, NormalizedResnet
@@ -119,7 +129,7 @@ if __name__=='__main__':
     for i,param in enumerate(net.parameters()):
         param.data = my_params[i]
         print(f'set param {i}')
-    
+
     inp = torch.tensor([0, 0, 250,250])
     dp = DeepPolyNet(net, inp, 1, 1)
     out = dp(inp)

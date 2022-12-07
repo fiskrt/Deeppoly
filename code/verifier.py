@@ -71,7 +71,7 @@ def main():
 
     net_name = get_net_name(args.net)
     dataset = 'mnist' if 'mnist' in net_name else 'cifar10'
-    
+
     inputs, true_label, eps = get_spec(args.spec, dataset)
     net = get_net(args.net, net_name)
 

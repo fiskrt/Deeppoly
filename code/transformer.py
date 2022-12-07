@@ -106,7 +106,6 @@ class AbstractAffine(AbstractLayer):
         self.W_lower2 = self.W.clone()
         self.b_upper2 = self.b.clone()
         self.b_lower2 = self.b.clone()
-
         self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
         self.b_upper = (w_pos*self.W)@prev_layer.b_upper+(~w_pos*self.W)@prev_layer.b_lower + self.b
 
