@@ -84,7 +84,7 @@ def conv_to_affine(conv, input_shape):
 
         NOTE: Non-square kernel, stride and padding is not handled.
     """
-
+    print(f'Making conv layer: inp_shape: {input_shape}')
     W = multiple_channel_with_stride(
             kernel=conv.weight.data, 
             input_size=(conv.in_channels, input_shape[-2], input_shape[-1]),
@@ -130,8 +130,8 @@ def test_conv(inp, out_channels, k, stride, verbose=False):
 if __name__=='__main__':
     import torch.nn as nn
     stride = 2
-    inp = torch.rand((3,32,32))
-    out_channels = 2 
+    inp = torch.rand((1,32,32))
+    out_channels = 1 
     k = 3
-    for _ in range(1):
+    for _ in range(10):
         test_conv(inp, out_channels, k, stride, verbose=False)

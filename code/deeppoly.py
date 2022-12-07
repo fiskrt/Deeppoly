@@ -37,30 +37,30 @@ class DeepPolyNet(nn.Module):
 
     def verify(self):
         out = self(self.input) # Dummy call to init parameters
-        #print(f'normal lb: {out.lb}')
+        print(f'lb: {out.lb}')
 #        print(f'bsub lb: {out.bsub_lb}')
         #print(out.bsub_ub<=out.ub)
         #print(out.bsub_lb>=out.lb)
 
         optimizer = optim.SGD(self.parameters(), lr=0.5)
         verified = False
-        for i in range(30):
+        for i in range(50):
             optimizer.zero_grad()
             out = self(self.input)
 #            if i ==0:
 #                print(out.lb)
-
+            print(out.lb[out.lb<0])
             loss = -out.lb.mean()
             loss.backward()
 #            if i%20==0:
 #                print(out.lb)
 
-            optimizer.step()
             if (out.lb>=0).all():
                 verified = True
-                #return True
+                return True
+            optimizer.step()
       #  print(out.lb)
-      #  print(f'Alpha final: {list(self.parameters())[0].data}')
+        print(f'Alpha final: {list(self.parameters())[0].data}')
         
         return verified
     

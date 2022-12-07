@@ -190,7 +190,7 @@ class AbstractInput(AbstractLayer):
     
     def forward(self, x):
         # Remove batch dimension
-        x = x.squeeze(0)
+        #x = x.squeeze(0)
         assert x.dim() == 3, 'Dimension should be 3 in input!'
         # Cheat and just flatten the the image HxW to HW immediately
         x = x.flatten(start_dim=1)
