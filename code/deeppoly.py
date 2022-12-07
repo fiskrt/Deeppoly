@@ -1,7 +1,7 @@
 import torch.nn.functional as F
 import torch.optim as optim
 
-from toeplitz_ops import multiple_channel_with_stride
+from conv2affine import conv_to_affine
 from transformer import *
 import networks
 
@@ -18,7 +18,13 @@ class DeepPolyNet(nn.Module):
         #print(f'orignal net outp: {orig_net(inp)}')
         #self.target = orig_net(inp).squeeze()
         self.true_label = true_label # the actual number, not the index!
-        self.input = inp
+        if inp.dim() == 3:
+            self.input = inp
+        elif inp.dim() == 4:
+            # Remove batch dimension
+            self.input = inp.squeeze(0)
+        else:
+            assert False, 'Input shape error'
 
         self.abs_net = self.abstractize_network(orig_net)
 
@@ -64,19 +70,13 @@ class DeepPolyNet(nn.Module):
             Turn convolutions, input normalization, batch norm
             into affine layers which allows for shape propagation.
         """
-        prev_shape = None
-        first_conv = True
+        # keep track of the shape (num_channels, H, W)
+        prev_shape = self.input.shape
         layers = [AbstractInput(self.eps)]
         for m in net.modules():
             if isinstance(m, nn.Conv2d):
-                stride = m.stride[0]
-                if first_conv:
-                    input_shape = self.input.shape
-                    first_conv = False
-                else:
-                    input_shape = prev_shape
-                prev_shape = (m.out_channels, input_shape[-2]//stride, input_shape[-1]//stride)
-                layers.append(AbstractAffine(multiple_channel_with_stride(kernel=m.weight.data, input_size=(m.in_channels, input_shape[-2], input_shape[-1]), stride=stride, padding=m.padding[0]), torch.repeat_interleave(m.bias.data, (input_shape[-2]//stride) * (input_shape[-1]//stride))))
+                W, b, prev_shape = conv_to_affine(m, prev_shape)
+                layers.append(AbstractAffine(W,b))
             elif isinstance(m, nn.Linear):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):

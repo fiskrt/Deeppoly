@@ -74,3 +74,64 @@ def multiple_channel_with_stride(kernel, input_size, stride, padding=1):
     mask = np.tile(mask, t)
     weights = weights[mask > 0]
     return torch.from_numpy(weights.astype('float32'))
+
+def conv_to_affine(conv, input_shape):
+    """
+        conv: nn.Module
+        input_shape: (in_channels, H, W)
+
+        out_channels are implicit from conv.weight.shape
+
+        NOTE: Non-square kernel, stride and padding is not handled.
+    """
+
+    W = multiple_channel_with_stride(
+            kernel=conv.weight.data, 
+            input_size=(conv.in_channels, input_shape[-2], input_shape[-1]),
+            stride=conv.stride[0],
+            padding=conv.padding[0]
+            )
+    out_shape = (int((input_shape[1]+2*conv.padding[0]-(conv.kernel_size[0]-1)-1)/conv.stride[0] + 1),
+                int((input_shape[2]+2*conv.padding[0]-(conv.kernel_size[1]-1)-1)/conv.stride[1] + 1))
+
+    b = torch.repeat_interleave(conv.bias.data, out_shape[0]*out_shape[1])
+
+    return W, b, (conv.out_channels, out_shape[0], out_shape[1])
+
+
+def test_conv(inp, out_channels, k, stride, verbose=False):
+    input_shape = inp.shape 
+    m = nn.Conv2d(input_shape[0], out_channels, (k,k), stride=stride, padding=1)
+    #m.weight.data = torch.ones_like(m.weight.data)
+    #m.bias.data = torch.zeros_like(m.bias.data)
+
+    W, b, out_shape = conv_to_affine(m, input_shape)
+
+    print('Conv2d:')
+    res_correct = m(inp)
+    if verbose:
+        pass
+        #print(res_correct)
+    print(f'W shape:{W.shape}')
+    print(f'inp shape:{inp.flatten().shape}')
+
+    res = (W@inp.flatten()+b).reshape(m.out_channels,out_shape[1],out_shape[2])
+    print(res.shape)
+    if verbose:
+        #print(res)
+        print('diff:')
+        mask = ~torch.isclose(res_correct,res, atol=1e-6)
+        print(res[mask]-res_correct[mask]) 
+#        print(res[mask]) 
+
+    assert torch.isclose(res_correct,res, atol=1e-6).all()
+
+
+if __name__=='__main__':
+    import torch.nn as nn
+    stride = 2
+    inp = torch.rand((3,32,32))
+    out_channels = 2 
+    k = 3
+    for _ in range(1):
+        test_conv(inp, out_channels, k, stride, verbose=False)
