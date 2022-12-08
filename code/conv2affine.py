@@ -94,7 +94,10 @@ def conv_to_affine(conv, input_shape):
     out_shape = (int((input_shape[1]+2*conv.padding[0]-(conv.kernel_size[0]-1)-1)/conv.stride[0] + 1),
                 int((input_shape[2]+2*conv.padding[0]-(conv.kernel_size[1]-1)-1)/conv.stride[1] + 1))
 
-    b = torch.repeat_interleave(conv.bias.data, out_shape[0]*out_shape[1])
+    if conv.bias:
+        b = torch.repeat_interleave(conv.bias.data, out_shape[0]*out_shape[1])
+    else:
+        b = torch.zeros((conv.out_channels*out_shape[0]*out_shape[1]), dtype=torch.float32)
 
     return W, b, (conv.out_channels, out_shape[0], out_shape[1])
 
