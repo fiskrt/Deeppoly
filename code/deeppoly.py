@@ -64,6 +64,26 @@ class DeepPolyNet(nn.Module):
         
         return verified
     
+    def _layers_to_abstract(self, net, prev_shape, deeper=True):
+        layers = []
+        for m in net.children():
+            if len(list(m.children())) > 0 and deeper:
+                layers.extend(self._layers_to_abstract(m, prev_shape, deeper=False))
+
+            if isinstance(m, nn.Conv2d):
+                W, b, prev_shape = conv_to_affine(m, prev_shape)
+                layers.append(AbstractAffine(W,b))
+            elif isinstance(m, nn.Linear):
+                layers.append(AbstractAffine(m.weight.data, m.bias.data))
+            elif isinstance(m, nn.ReLU):
+                layers.append(AbstractReLU())
+            elif isinstance(m, networks.Normalization):
+                layers.append(AbstractNormalize(m.mean, m.sigma))
+            elif isinstance(m, networks.BasicBlock):
+                path_a = self._layers_to_abstract(m.path_a, prev_shape)
+                path_b = self._layers_to_abstract(m.path_b, prev_shape)
+                layers.append(AbstractBlock(path_a, path_b))
+        return layers
 
     def abstractize_network(self, net):
         """
@@ -73,41 +93,15 @@ class DeepPolyNet(nn.Module):
         # keep track of the shape (num_channels, H, W)
         prev_shape = self.input.shape
         layers = [AbstractInput(self.eps)]
-        for m in net.modules():
-            if isinstance(m, nn.Conv2d):
-                W, b, prev_shape = conv_to_affine(m, prev_shape)
-                layers.append(AbstractAffine(W,b))
-            elif isinstance(m, nn.Linear):
-                layers.append(AbstractAffine(m.weight.data, m.bias.data))
-            elif isinstance(m, nn.ReLU):
-                layers.append(AbstractReLU(m, layers[-1]))
-           # elif isinstance(m, nn.Flatten):
-           #     layers.append(AbstractFlatten())
-            elif isinstance(m, networks.Normalization):
-                layers.append(AbstractNormalize(m.mean, m.sigma))
+
+        layers.extend(self._layers_to_abstract(net, prev_shape))
 
         assert isinstance(layers[0], AbstractInput) 
-        assert isinstance(layers[1], AbstractNormalize) 
-#        assert isinstance(layers[2], AbstractFlatten) 
+#        assert isinstance(layers[1], AbstractNormalize) 
         assert isinstance(layers[-1], AbstractAffine), "Final layer is not affine!"
         layers[-1] = AbstractOutput(layers[-1].W, layers[-1].b, self.true_label)
 
         return nn.Sequential(*layers)
-
-
-    
-    def loss(self, output):
-        """
-            output: tensor of lb/ub
-            target: the predicted class that we want to prove robust
-        """
-        target = F.one_hot(self.target.argmax(keepdim=True), output.lb.shape[0]).squeeze().bool()
-        lb_correct = output.lb[target]
-        ub_wrong_classes = output.ub[~target]
-        loss = -(lb_correct - ub_wrong_classes.max())
-        return loss
-
-
 
 if __name__=='__main__':
     from networks import get_network, get_net_name, NormalizedResnet

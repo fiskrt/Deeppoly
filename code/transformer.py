@@ -71,7 +71,7 @@ class AbstractLayer(nn.Module):
 
 class AbstractAffine(AbstractLayer):
 
-    def __init__(self, W, b):
+    def __init__(self, W, b, conv=False):
         super().__init__()
 #        assert isinstance(layer, nn.Linear), 'not linear'
         # Each node contain a upper and lower bound: 1D array
@@ -89,8 +89,6 @@ class AbstractAffine(AbstractLayer):
         self.b_lower = None
         self.n_out, self.n_in = self.W.shape
     
-    def __str__(self):
-        return 'AbstractAffine'
         
     def forward(self, prev_layer):
         self.prev = prev_layer
@@ -338,11 +336,31 @@ class AbstractNormalize(AbstractLayer):
         self.b_lower2 = self.b_lower
 
         return self
+
+
+class AbstractBlock(AbstractLayer):
+    """
+        Represent the whole block with a W_u, W_l.
+
+        This will lose precision since there are ReLUs
+        and multiple layers
+    """
+
+    def __init__(self, path_a, path_b):
+        super().__init__()
+        # path=[] if it consist of only nn.Identity
+        self.path_a = path_a
+        self.path_b = path_b
+
+    def forward(self, x):
+        # TODO: how do we set self.n_in/n_out?
+        # this layer have to act like a normal layer!
+        pass
         
 
 class AbstractReLU(AbstractLayer):
 
-    def __init__(self, layer, last_layer):
+    def __init__(self):
         super().__init__()
         self.prev = None
         self.ub = None
