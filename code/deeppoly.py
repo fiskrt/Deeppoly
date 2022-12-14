@@ -3,7 +3,7 @@ import torch.optim as optim
 
 from conv2affine import conv_to_affine
 from transformer import *
-import networks
+from networks import BasicBlock, Normalization
 
 class DeepPolyNet(nn.Module):
     """
@@ -15,6 +15,7 @@ class DeepPolyNet(nn.Module):
         self.eps = eps
         self.prev_layer = None
         self.is_residual = False
+        print(orig_net)
         #print(f'orignal net outp: {orig_net(inp)}')
         #self.target = orig_net(inp).squeeze()
         self.true_label = true_label # the actual number, not the index!
@@ -65,10 +66,14 @@ class DeepPolyNet(nn.Module):
         return verified
     
     def _layers_to_abstract(self, net, prev_shape, deeper=True):
+        """
+            Only check modules of max depth = 2. Ignore deeper ones.
+        """
         layers = []
         for m in net.children():
             if len(list(m.children())) > 0 and deeper:
-                layers.extend(self._layers_to_abstract(m, prev_shape, deeper=False))
+                l, prev_shape = self._layers_to_abstract(m, prev_shape, deeper=False)
+                layers.extend(l)
 
             if isinstance(m, nn.Conv2d):
                 W, b, prev_shape = conv_to_affine(m, prev_shape)
@@ -77,13 +82,15 @@ class DeepPolyNet(nn.Module):
                 layers.append(AbstractAffine(m.weight.data, m.bias.data))
             elif isinstance(m, nn.ReLU):
                 layers.append(AbstractReLU())
-            elif isinstance(m, networks.Normalization):
+            elif isinstance(m, Normalization):
                 layers.append(AbstractNormalize(m.mean, m.sigma))
-            elif isinstance(m, networks.BasicBlock):
-                path_a = self._layers_to_abstract(m.path_a, prev_shape)
-                path_b = self._layers_to_abstract(m.path_b, prev_shape)
+            elif isinstance(m, BasicBlock):
+                path_a, block_out_shape_a = self._layers_to_abstract(m.path_a, prev_shape)
+                path_b, block_out_shape_b = self._layers_to_abstract(m.path_b, prev_shape)
+                assert block_out_shape_a == block_out_shape_b
+                prev_shape = block_out_shape_a
                 layers.append(AbstractBlock(path_a, path_b))
-        return layers
+        return layers, prev_shape
 
     def abstractize_network(self, net):
         """
@@ -94,14 +101,33 @@ class DeepPolyNet(nn.Module):
         prev_shape = self.input.shape
         layers = [AbstractInput(self.eps)]
 
-        layers.extend(self._layers_to_abstract(net, prev_shape))
+        ls, _ = self._layers_to_abstract(net, prev_shape)
+        layers.extend(ls)
+
+        # TODO: resnets are not normalized, but our transformers must have
+        # normalization since the shape is fixed, and the first bounds are set there
+        # hence we might just always add the normalize layer with sigma=1, mean=0 so it
+        # only fixes the shape.
+
+        if not isinstance(layers[1], AbstractNormalize):
+            layers.insert(1, AbstractNormalize(None, None, only_flatten=True))
 
         assert isinstance(layers[0], AbstractInput) 
+
 #        assert isinstance(layers[1], AbstractNormalize) 
         assert isinstance(layers[-1], AbstractAffine), "Final layer is not affine!"
         layers[-1] = AbstractOutput(layers[-1].W, layers[-1].b, self.true_label)
 
         return nn.Sequential(*layers)
+
+if __name__=='__main__':
+    from networks import get_network
+    n = get_network('cpu', 'net8')
+    inp = torch.ones((1,3,32,32))
+    dp = DeepPolyNet(n, inp, 1, 3)
+    out = dp(inp)
+    print()
+    exit()
 
 if __name__=='__main__':
     from networks import get_network, get_net_name, NormalizedResnet
@@ -130,6 +156,7 @@ if __name__=='__main__':
     print(out.lb)
     print(out.ub)
     exit()
+
 
 
 if __name__=='__main__':

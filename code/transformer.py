@@ -16,6 +16,7 @@ class AbstractLayer(nn.Module):
     """
     def __init__(self):
         super().__init__()
+        self.is_block = False
 
     def backsub(self):
         layer = self
@@ -104,11 +105,21 @@ class AbstractAffine(AbstractLayer):
         self.W_lower2 = self.W.clone()
         self.b_upper2 = self.b.clone()
         self.b_lower2 = self.b.clone()
-        self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
-        self.b_upper = (w_pos*self.W)@prev_layer.b_upper+(~w_pos*self.W)@prev_layer.b_lower + self.b
 
-        self.W_lower = (w_pos*self.W)@prev_layer.W_lower+(~w_pos*self.W)@prev_layer.W_upper
-        self.b_lower = (w_pos*self.W)@prev_layer.b_lower+(~w_pos*self.W)@prev_layer.b_upper + self.b
+        if self.is_block:
+            self.W_upper = (w_pos*self.W)@prev_layer.W_upper+(~w_pos*self.W)@prev_layer.W_lower
+            self.b_upper = (w_pos*self.W)@prev_layer.b_upper+(~w_pos*self.W)@prev_layer.b_lower + self.b
+
+            self.W_lower = (w_pos*self.W)@prev_layer.W_lower+(~w_pos*self.W)@prev_layer.W_upper
+            self.b_lower = (w_pos*self.W)@prev_layer.b_lower+(~w_pos*self.W)@prev_layer.b_upper + self.b
+        else:
+            # TODO: should be n_out or n_in or doesnt matter?
+            self.W_upper = torch.eye(self.n_out)
+            self.W_upper = torch.eye(self.n_out)
+            self.W_lower = torch.eye(self.n_out)
+            self.b_upper = torch.eye(self.n_out)
+            self.b_lower = torch.eye(self.n_out)
+
 
         # Since W_upper and W_lower contain the constraints in terms of the input layers
         # we use the input lower/upper bound. I.e this automatically does backsub to input layer. 
@@ -121,14 +132,6 @@ class AbstractAffine(AbstractLayer):
         # @@@@@ bounds in term of previous layer
         self.ub = (wu_pos*self.W_upper2)@prev_layer.ub+(~wu_pos*self.W_upper2)@prev_layer.lb+self.b_upper2 
         self.lb = (wl_pos*self.W_lower2)@prev_layer.lb+(~wl_pos*self.W_lower2)@prev_layer.ub+self.b_lower2 
-
-        #bsub = self.backsub()
-        #self.bsub_ub = bsub[0]
-        #self.bsub_lb = bsub[1]
-        #if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
-        #    print(f'BACKSUB and ub/lb are same in {self}')
-        #else:
-        #    print(f'BACKSUB NOT same in {self}!!')
 
         return self
 
@@ -189,6 +192,8 @@ class AbstractInput(AbstractLayer):
     def forward(self, x):
         # Remove batch dimension
         #x = x.squeeze(0)
+        if x.dim() == 4:
+            x = x.squeeze(0)
         assert x.dim() == 3, 'Dimension should be 3 in input!'
         # Cheat and just flatten the the image HxW to HW immediately
         x = x.flatten(start_dim=1)
@@ -258,7 +263,7 @@ class AbstractFlatten(AbstractLayer):
 
 
 class AbstractNormalize(AbstractLayer):
-    def __init__(self, mean, sigma):
+    def __init__(self, mean, sigma, only_flatten=False):
         super().__init__()
         self.prev = None
 
@@ -278,6 +283,8 @@ class AbstractNormalize(AbstractLayer):
         self.b_upper = None
         self.W_lower = None
         self.b_lower = None
+
+        self.only_flatten = only_flatten
     
     def forward(self, prev_layer):
         # set this as first layer?
@@ -287,28 +294,38 @@ class AbstractNormalize(AbstractLayer):
 
         #self.n_in = prev_layer.n_out
         #self.n_out = self.n_in
-        prev_shape = prev_layer.lb.shape
-        if prev_shape[0] == 1:
-            m = self.mean.squeeze().unsqueeze(0)
-            s = self.sigma.squeeze().unsqueeze(0)
-            self.ub = (1/s)*prev_layer.ub.squeeze(0)-(m/s)
-            self.lb = (1/s)*prev_layer.lb.squeeze(0)-(m/s)
+
+        if self.only_flatten:
+            self.ub = prev_layer.ub.flatten()
+            self.lb = prev_layer.lb.flatten()
             self.W_upper = torch.eye(self.ub.shape[0])
             self.W_lower = torch.eye(self.ub.shape[0])
             self.b_upper = torch.zeros(self.ub.shape[0])
             self.b_lower = torch.zeros(self.ub.shape[0])
-            assert self.ub.dim() == 1
-        elif prev_shape[0] == 3:
-            m = self.mean.squeeze()
-            s = self.sigma.squeeze()
-            self.ub = ((1/s)[:, None]*prev_layer.ub - (m/s)[:, None]).flatten()
-            self.lb = ((1/s)[:, None]*prev_layer.lb - (m/s)[:, None]).flatten()
-            self.W_upper = torch.eye(self.ub.shape[0])
-            self.W_lower = torch.eye(self.ub.shape[0])
-            self.b_upper = torch.zeros(self.ub.shape[0])
-            self.b_lower = torch.zeros(self.ub.shape[0])
+
         else:
-            assert False, 'Number of channels must be 1 or 3!'
+            prev_shape = prev_layer.lb.shape
+            if prev_shape[0] == 1:
+                m = self.mean.squeeze().unsqueeze(0)
+                s = self.sigma.squeeze().unsqueeze(0)
+                self.ub = (1/s)*prev_layer.ub.squeeze(0)-(m/s)
+                self.lb = (1/s)*prev_layer.lb.squeeze(0)-(m/s)
+                self.W_upper = torch.eye(self.ub.shape[0])
+                self.W_lower = torch.eye(self.ub.shape[0])
+                self.b_upper = torch.zeros(self.ub.shape[0])
+                self.b_lower = torch.zeros(self.ub.shape[0])
+                assert self.ub.dim() == 1
+            elif prev_shape[0] == 3:
+                m = self.mean.squeeze()
+                s = self.sigma.squeeze()
+                self.ub = ((1/s)[:, None]*prev_layer.ub - (m/s)[:, None]).flatten()
+                self.lb = ((1/s)[:, None]*prev_layer.lb - (m/s)[:, None]).flatten()
+                self.W_upper = torch.eye(self.ub.shape[0])
+                self.W_lower = torch.eye(self.ub.shape[0])
+                self.b_upper = torch.zeros(self.ub.shape[0])
+                self.b_lower = torch.zeros(self.ub.shape[0])
+            else:
+                assert False, 'Number of channels must be 1 or 3!'
 
         #I = torch.eye(prev_shape[1])
         ## store just the diagonals C x WH, otherwise too big
@@ -349,14 +366,46 @@ class AbstractBlock(AbstractLayer):
     def __init__(self, path_a, path_b):
         super().__init__()
         # path=[] if it consist of only nn.Identity
-        self.path_a = path_a
-        self.path_b = path_b
+        # need to get W_u and W_l for [AbstractAffine, AbstractReLU, AbstractAffine]
+        for l in path_a:
+            l.is_block = True
+        for l in path_b:
+            l.is_block = True
+        self.path_a = nn.Sequential(*path_a)
+        self.path_b = nn.Sequential(*path_b)
 
-    def forward(self, x):
-        # TODO: how do we set self.n_in/n_out?
-        # this layer have to act like a normal layer!
-        pass
-        
+    def forward(self, prev_layer):
+        # this layer have to act like any other abstract layer!
+
+        # x -> BLOCK -> y   ==   x-> a(x) + b(x) -> y
+        # want to push constraints through block. The constraints
+        # should be represented in terms of the input layer x, like y<Wx.
+
+        self.prev = prev_layer
+        # Push shape from previous layer through this layer
+        self.input_ub = prev_layer.input_ub
+        self.input_lb = prev_layer.input_lb
+
+        # get W,b constraints in term of the input to this block
+        out_a = self.path_a(prev_layer)
+        out_b = self.path_b(prev_layer)
+        self.n_in = prev_layer.n_out
+        self.n_out = out_a.n_out
+        assert out_a.n_out == out_b.n_out, "Paths have different out dims"
+
+        # Only set W2. No need to set W since no nestling of Blocks are allowed.
+        self.W_upper2 = out_a.W_upper + out_b.W_upper
+        self.W_lower2 = out_a.W_lower + out_b.W_lower
+        self.b_upper2 = out_a.b_upper + out_b.b_upper
+        self.b_lower2 = out_a.b_lower + out_b.b_lower
+
+        # copied from affine. We would want to reuse this code somehow. set superclass Affine/make affine object here?
+        wu_pos = self.W_upper2 >= 0.
+        wl_pos = self.W_lower2 >= 0.
+        self.ub = (wu_pos*self.W_upper2)@prev_layer.ub+(~wu_pos*self.W_upper2)@prev_layer.lb+self.b_upper2 
+        self.lb = (wl_pos*self.W_lower2)@prev_layer.lb+(~wl_pos*self.W_lower2)@prev_layer.ub+self.b_lower2 
+
+        return self 
 
 class AbstractReLU(AbstractLayer):
 
@@ -378,11 +427,6 @@ class AbstractReLU(AbstractLayer):
         self.b_lower = None
 
         self.inited = False
-
-#        self.alpha = UninitializedParameter()
-        
-    def __str__(self):
-        return 'AbstractReLU'
 
     def forward(self, prev_layer):    
         #print('calling backsub before ReLU layer')
@@ -417,10 +461,11 @@ class AbstractReLU(AbstractLayer):
         self.ub = torch.zeros(self.n_out)
         self.lb = torch.zeros(self.n_out)
         
-        self.W_upper = torch.zeros((self.n_out, prev_layer.W_upper.shape[1]))
-        self.b_upper = torch.zeros(self.n_out)
-        self.W_lower = torch.zeros((self.n_out, prev_layer.W_lower.shape[1]))
-        self.b_lower = torch.zeros(self.n_out)
+        if self.is_block:
+            self.W_upper = torch.zeros((self.n_out, prev_layer.W_upper.shape[1]))
+            self.b_upper = torch.zeros(self.n_out)
+            self.W_lower = torch.zeros((self.n_out, prev_layer.W_lower.shape[1]))
+            self.b_lower = torch.zeros(self.n_out)
 
         self.W_upper2 = torch.zeros((self.n_in, self.n_in))
         self.W_lower2 = torch.zeros((self.n_in, self.n_in))
@@ -431,10 +476,11 @@ class AbstractReLU(AbstractLayer):
         self.ub[pos_mask] = prev_layer.ub[pos_mask]
         self.lb[pos_mask] = prev_layer.lb[pos_mask]
 
-        self.W_upper[pos_mask] = prev_layer.W_upper[pos_mask]
-        self.b_upper[pos_mask] = prev_layer.b_upper[pos_mask]
-        self.W_lower[pos_mask] = prev_layer.W_lower[pos_mask]
-        self.b_lower[pos_mask] = prev_layer.b_lower[pos_mask]
+        if self.is_block:
+            self.W_upper[pos_mask] = prev_layer.W_upper[pos_mask]
+            self.b_upper[pos_mask] = prev_layer.b_upper[pos_mask]
+            self.W_lower[pos_mask] = prev_layer.W_lower[pos_mask]
+            self.b_lower[pos_mask] = prev_layer.b_lower[pos_mask]
 
 
         arr = torch.zeros(self.n_in)
@@ -466,12 +512,13 @@ class AbstractReLU(AbstractLayer):
             # where a_i is given by u/(u-l) and b_i=-u*l/(u*l)
             a = prev_layer.ub[cross_mask] / (prev_layer.ub[cross_mask]-prev_layer.lb[cross_mask])
             b = -prev_layer.lb[cross_mask] * a
-            self.W_upper[cross_mask] = torch.einsum('i,ij->ij', a, prev_layer.W_upper[cross_mask])
-            self.b_upper[cross_mask] = a*prev_layer.b_upper[cross_mask] + b
+            if self.is_block:
+                self.W_upper[cross_mask] = torch.einsum('i,ij->ij', a, prev_layer.W_upper[cross_mask])
+                self.b_upper[cross_mask] = a*prev_layer.b_upper[cross_mask] + b
 
-            # Calculate lowerbound with alpha parameterization alpha*x
-            self.W_lower[cross_mask] = torch.einsum('i,ij->ij', self.alpha[cross_mask], prev_layer.W_lower[cross_mask])
-            #self.b_lower[cross_mask] = prev_layer.b_lower[cross_mask]
+                # Calculate lowerbound with alpha parameterization alpha*x
+                self.W_lower[cross_mask] = torch.einsum('i,ij->ij', self.alpha[cross_mask], prev_layer.W_lower[cross_mask])
+                #self.b_lower[cross_mask] = prev_layer.b_lower[cross_mask]
 
 
             # After a ReLU backsub cannot help us, so we only need the ub/lb from previous layer
@@ -498,12 +545,13 @@ class AbstractReLU(AbstractLayer):
             self.b_upper2[cross_mask] = b
             self.W_lower2[cross_mask] = torch.diag(alpha2)[cross_mask]
             self.b_lower2[cross_mask] = 0. 
-        
-#        bsub = self.backsub()
-#        if (bsub[0] == self.ub).all() and (bsub[1] == self.lb).all():
-#            print(f'BACKSUB and ub/lb are same in {self}')
-#        else:
-#            print(f'BACKSUB NOT same in {self}!!')
+
+        if not self.is_block:
+            # TODO: should be set to identity?
+            self.W_upper = torch.eye(self.n_in)
+            self.W_lower = torch.eye(self.n_in)
+            self.b_upper = torch.zeros(self.n_in)
+            self.b_lower = torch.zeros(self.n_in)
 
         return self
 
