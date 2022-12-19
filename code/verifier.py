@@ -26,6 +26,8 @@ def transform_image(pixel_values, input_dim):
 def get_spec(spec, dataset):
     input_dim = [1, 28, 28] if dataset == 'mnist' else [3, 32, 32]
     eps = float(spec[:-4].split('/')[-1].split('_')[-1])
+    import os
+    print(os.getcwd())
     test_file = open(spec, "r")
     test_instances = csv.reader(test_file, delimiter=",")
     for i, (label, *pixel_values) in enumerate(test_instances):

@@ -428,13 +428,8 @@ class AbstractReLU(AbstractLayer):
 
         self.inited = False
 
-    def forward(self, prev_layer):    
-        #print('calling backsub before ReLU layer')
+    def forward(self, prev_layer):
         ub, lb = prev_layer.backsub()
-        #if (ub == prev_layer.ub).all() and (lb == prev_layer.lb).all():
-        #    print(f'BACKSUB and ub/lb are same before {self}')
-        #else:
-        #    print(f'BACKSUB NOT same before {self}!!')
         prev_layer.ub = ub
         prev_layer.lb = lb
         #print(f'backsub ub: {ub}')
@@ -488,6 +483,9 @@ class AbstractReLU(AbstractLayer):
         self.W_upper2[pos_mask] = torch.diag(arr)[pos_mask]
         self.W_lower2[pos_mask] = torch.diag(arr)[pos_mask]
 
+        if self.inited: 
+            self.alpha.data = self.alpha.clamp(0,1)
+
         # Crossing case: 
         if cross_mask.any():
             # TODO: How to init alpha? random/minimum area?
@@ -499,11 +497,11 @@ class AbstractReLU(AbstractLayer):
             with torch.no_grad():
                 if not self.inited:
                     self.inited = ~self.inited
-                    alpha = 0.* torch.ones(self.n_out)
-                    alpha[prev_layer.ub > -prev_layer.lb] = 1.
+                    #alpha = 0.* torch.ones(self.n_out)
+                    #alpha[prev_layer.ub > -prev_layer.lb] = 1.
+                    alpha = torch.rand(self.n_out)
                     self.alpha = Parameter(alpha)
                 # remove if here? useless?
-                self.alpha.data = self.alpha.clamp(0,1)
 
             #print(f'Number of crossing ReLUs: {cross_mask.sum()}')
 
@@ -518,12 +516,14 @@ class AbstractReLU(AbstractLayer):
 
                 # Calculate lowerbound with alpha parameterization alpha*x
                 self.W_lower[cross_mask] = torch.einsum('i,ij->ij', self.alpha[cross_mask], prev_layer.W_lower[cross_mask])
+
                 #self.b_lower[cross_mask] = prev_layer.b_lower[cross_mask]
 
 
             # After a ReLU backsub cannot help us, so we only need the ub/lb from previous layer
             self.ub[cross_mask] = prev_layer.ub[cross_mask]
-            #self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
+            # TODO: set this to 0?
+#            self.lb[cross_mask] = self.alpha[cross_mask]*prev_layer.lb[cross_mask]
             # Lowerbound after a ReLU is always alpha*x
             #self.lb[cross_mask] = self.alpha[cross_mask]*(self.W_lower[cross_mask]@prev_layer.lb[cross_mask])
             # when alpha>0 so we get lower constrain x2>= alpha*x, we must backsub to get the real lowerbound
@@ -545,6 +545,7 @@ class AbstractReLU(AbstractLayer):
             self.b_upper2[cross_mask] = b
             self.W_lower2[cross_mask] = torch.diag(alpha2)[cross_mask]
             self.b_lower2[cross_mask] = 0. 
+        
 
         if not self.is_block:
             # TODO: should be set to identity?

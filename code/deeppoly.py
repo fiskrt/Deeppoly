@@ -3,22 +3,18 @@ import torch.optim as optim
 
 from conv2affine import conv_to_affine
 from transformer import *
-from networks import BasicBlock, Normalization
+from networks import BasicBlock, Normalization, NormalizedResnet
 
 class DeepPolyNet(nn.Module):
     """
         Turn a network into a network that allows for bound propagation.
-
     """
     def __init__(self, orig_net, inp, eps, true_label):
         super().__init__()
         self.eps = eps
         self.prev_layer = None
         self.is_residual = False
-        print(orig_net)
-        #print(f'orignal net outp: {orig_net(inp)}')
-        #self.target = orig_net(inp).squeeze()
-        self.true_label = true_label # the actual number, not the index!
+        self.true_label = true_label 
         if inp.dim() == 3:
             self.input = inp
         elif inp.dim() == 4:
@@ -38,30 +34,28 @@ class DeepPolyNet(nn.Module):
 
     def verify(self):
         out = self(self.input) # Dummy call to init parameters
-        print(f'lb: {out.lb}')
-#        print(f'bsub lb: {out.bsub_lb}')
-        #print(out.bsub_ub<=out.ub)
-        #print(out.bsub_lb>=out.lb)
+        #print(f'lb: {out.lb}')
 
         optimizer = optim.SGD(self.parameters(), lr=0.5)
         verified = False
         for i in range(50):
             optimizer.zero_grad()
             out = self(self.input)
-#            if i ==0:
-#                print(out.lb)
-            print(out.lb[out.lb<0])
+
+        #    print(out.lb[out.lb<0])
             loss = -out.lb.mean()
             loss.backward()
 #            if i%20==0:
 #                print(out.lb)
 
             if (out.lb>=0).all():
+                #print(f'Took {i} iterations')
+                #print(out.lb)
                 verified = True
                 return True
             optimizer.step()
       #  print(out.lb)
-        print(f'Alpha final: {list(self.parameters())[0].data}')
+        #print(f'Alpha final: {list(self.parameters())[0].data}')
         
         return verified
     
@@ -71,7 +65,8 @@ class DeepPolyNet(nn.Module):
         """
         layers = []
         for m in net.children():
-            if len(list(m.children())) > 0 and deeper:
+#            if len(list(m.children())) > 0 and deeper:
+            if not isinstance(m, BasicBlock):
                 l, prev_shape = self._layers_to_abstract(m, prev_shape, deeper=False)
                 layers.extend(l)
 
@@ -104,17 +99,8 @@ class DeepPolyNet(nn.Module):
         ls, _ = self._layers_to_abstract(net, prev_shape)
         layers.extend(ls)
 
-        # TODO: resnets are not normalized, but our transformers must have
-        # normalization since the shape is fixed, and the first bounds are set there
-        # hence we might just always add the normalize layer with sigma=1, mean=0 so it
-        # only fixes the shape.
-
-        if not isinstance(layers[1], AbstractNormalize):
-            layers.insert(1, AbstractNormalize(None, None, only_flatten=True))
-
         assert isinstance(layers[0], AbstractInput) 
-
-#        assert isinstance(layers[1], AbstractNormalize) 
+        assert isinstance(layers[1], AbstractNormalize) 
         assert isinstance(layers[-1], AbstractAffine), "Final layer is not affine!"
         layers[-1] = AbstractOutput(layers[-1].W, layers[-1].b, self.true_label)
 
@@ -122,8 +108,10 @@ class DeepPolyNet(nn.Module):
 
 if __name__=='__main__':
     from networks import get_network
-    n = get_network('cpu', 'net8')
+    n = get_network('cpu', 'net10')
+    n = NormalizedResnet('cpu', n)
     inp = torch.ones((1,3,32,32))
+#    print(n(inp))
     dp = DeepPolyNet(n, inp, 1, 3)
     out = dp(inp)
     print()

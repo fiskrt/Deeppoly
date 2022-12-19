@@ -20,7 +20,11 @@ def single_channel(kernel, input_size):
     input_rows, input_cols = input_size
     output_rows, output_cols = input_rows - kernel_rows + 1, input_cols - kernel_cols + 1
 
-    toeplitz = [toeplitz_from_vector((kernel[row, 0], *np.zeros(input_cols - kernel_cols)), (*kernel[row], *np.zeros(input_cols - kernel_cols))) for row in range(kernel_rows)]
+    toeplitz = [toeplitz_from_vector(
+                            (kernel[row, 0], *np.zeros(input_cols - kernel_cols)),
+                            (*kernel[row], *np.zeros(input_cols - kernel_cols))
+                            )
+                          for row in range(kernel_rows)]
 
     col, row = toeplitz[0].shape
 
@@ -34,7 +38,7 @@ def single_channel(kernel, input_size):
     return weights
 
 
-def multiple_channel(kernel, input_size, padding=1):
+def multiple_channel(kernel, input_size, padding):
     r, m, n = input_size
     kernel_size = kernel.shape
     output_size = (kernel_size[0], input_size[1] - (kernel_size[2] - 1) + 2 * padding,
@@ -58,7 +62,7 @@ def multiple_channel(kernel, input_size, padding=1):
     return weights
 
 @staticmethod
-def multiple_channel_with_stride(kernel, input_size, stride, padding=1):
+def multiple_channel_with_stride(kernel, input_size, stride, padding):
     r, m, n = input_size
     t = kernel.shape[0]
     weights = multiple_channel(kernel, (r, m, n), padding=padding)
@@ -84,7 +88,6 @@ def conv_to_affine(conv, input_shape):
 
         NOTE: Non-square kernel, stride and padding is not handled.
     """
-    print(f'Making conv layer: inp_shape: {input_shape}')
     W = multiple_channel_with_stride(
             kernel=conv.weight.data, 
             input_size=(conv.in_channels, input_shape[-2], input_shape[-1]),
@@ -99,6 +102,7 @@ def conv_to_affine(conv, input_shape):
     else:
         b = torch.repeat_interleave(conv.bias.data, out_shape[0]*out_shape[1])
 
+    #print(f'Making conv layer: inp_shape: {input_shape}. out_shape: {conv.out_channels, out_shape[0], out_shape[1]}')
     return W, b, (conv.out_channels, out_shape[0], out_shape[1])
 
 

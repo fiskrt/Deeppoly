@@ -127,3 +127,12 @@ def get_network(device, net):
         return ResNet(BasicBlock, num_stages=2, num_blocks=2, in_planes=8, bn=False, last_layer="dense")
     assert False
 
+if __name__ == '__main__':
+    from deeppoly import DeepPolyNet
+    n = get_network('cpu', 'net3')
+    inp = torch.ones((1,3,32,32))
+    dp = DeepPolyNet(n, inp, 1, 3)
+    abs_net = dp.abstractize_network(n)
+    out = abs_net(inp)
+    print(abs_net)
+    print()
