@@ -84,7 +84,7 @@ def conv_to_affine(conv, input_shape):
 
         NOTE: Non-square kernel, stride and padding is not handled.
     """
-    print(f'Making conv layer: inp_shape: {input_shape}')
+    #print(f'Making conv layer: inp_shape: {input_shape}')
     W = multiple_channel_with_stride(
             kernel=conv.weight.data, 
             input_size=(conv.in_channels, input_shape[-2], input_shape[-1]),

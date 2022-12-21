@@ -37,7 +37,7 @@ class DeepPolyNet(nn.Module):
 
     def verify(self):
         out = self(self.input) # Dummy call to init parameters
-        print(f'lb: {out.lb}')
+        #print(f'lb: {out.lb}')
 #        print(f'bsub lb: {out.bsub_lb}')
         #print(out.bsub_ub<=out.ub)
         #print(out.bsub_lb>=out.lb)
@@ -49,7 +49,7 @@ class DeepPolyNet(nn.Module):
             out = self(self.input)
 #            if i ==0:
 #                print(out.lb)
-            print(out.lb[out.lb<0])
+       #     print(out.lb[out.lb<0])
             loss = -out.lb.mean()
             loss.backward()
 #            if i%20==0:
@@ -60,7 +60,7 @@ class DeepPolyNet(nn.Module):
                 return True
             optimizer.step()
       #  print(out.lb)
-        print(f'Alpha final: {list(self.parameters())[0].data}')
+        #print(f'Alpha final: {list(self.parameters())[0].data}')
         
         return verified
     
